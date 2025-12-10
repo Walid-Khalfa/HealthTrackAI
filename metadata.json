@@ -1,0 +1,8 @@
+{
+  "name": "HealthTrackAI",
+  "description": "A safe, educational, multimodal medical assistant using Gemini 3 Pro to analyze symptoms via text, audio, and images.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
