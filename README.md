@@ -182,6 +182,7 @@ Create a new public bucket named `health_files` in Supabase Storage.
 ## 🛡️ Security & Privacy
 
 *   **Prompt Injection Protection:** All user inputs are wrapped in XML tags (`<user_input>`) before being sent to the LLM to prevent prompt injection attacks.
+*   **Session Management:** Automatic logout triggered after **15 minutes of inactivity** (no mouse movements or key presses) to protect sensitive health data on shared devices.
 *   **File Validation:** All uploads are validated via Magic Bytes signatures (in `supabaseClient.ts`) to ensure file integrity (e.g., ensuring a `.jpg` is actually an image).
 *   **RLS (Row Level Security):** Database policies ensure users can only access their own health records.
 
