@@ -218,6 +218,12 @@ Create a new public bucket named `health_files` in Supabase Storage.
 
 ---
 
-## 📄 License
+## 🔮 Future Roadmap
 
-Distributed under the MIT License. See `LICENSE` for more information.
+*   **Multi-language Support:** Native French/Spanish support via Gemini translation.
+*   **Clinician Portal:** A dedicated view for doctors to review patient-shared reports.
+*   **Wearable Integration:** Ingest Apple Health / Google Fit data.
+
+---
+*Built with ❤️ using Google AI Studio*
+
