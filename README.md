@@ -65,7 +65,7 @@
 
 ### 2. Clone the Repository
 ```bash
-git clone https://github.com/your-username/healthtrackai.git
+git clone https://github.com/Walid-Khalfa/healthtrackai.git
 cd healthtrackai
 ```
 
