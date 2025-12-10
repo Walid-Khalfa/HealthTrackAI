@@ -5,22 +5,38 @@
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Tech](https://img.shields.io/badge/tech-React%20%7C%20TypeScript%20%7C%20Supabase%20%7C%20Gemini-lightgrey)
 
-**HealthTrackAI** is a secure, educational, **multimodal medical assistant** built on the **Google Gemini 3 Pro** architecture. It allows users to analyze symptoms via text, audio recordings, medical images, and PDF documents to receive preliminary, non-diagnostic insights.
+**HealthTrackAI** is a secure, educational, **multimodal medical assistant** built on the **Google Gemini 3 Pro** architecture. It empowers users to analyze symptoms through various inputs—text descriptions, audio recordings, medical images, and PDF documents—to receive preliminary, non-diagnostic insights.
 
 > **⚠️ DISCLAIMER:** This application is for **educational purposes only**. It does not provide medical diagnosis, treatment, or prescriptions. In case of emergency, users are strictly advised to contact professional emergency services.
+
+---
+
+## 📖 Table of Contents
+
+- [Key Features](#-key-features)
+- [Tech Stack](#-tech-stack)
+- [Prerequisites](#-prerequisites)
+- [Installation & Setup](#-installation--setup)
+- [Usage Guide](#-usage-guide)
+- [Database Schema](#-database-schema-supabase)
+- [Security & Privacy](#-security--privacy)
+- [Project Structure](#-project-structure)
+- [Troubleshooting](#-troubleshooting)
+- [Contributing](#-contributing)
+- [License](#-license)
 
 ---
 
 ## 🚀 Key Features
 
 *   **🧠 Multimodal Analysis:**
-    *   **Text:** Symptom description processing.
+    *   **Text:** Detailed symptom description processing.
     *   **Audio:** Voice-to-text symptom transcription and analysis.
-    *   **Vision:** Analysis of dermatological issues or visible symptoms via images.
+    *   **Vision:** Image analysis for dermatological issues or visible symptoms.
     *   **Documents:** Parsing and explanation of PDF medical reports/lab results.
 *   **🤖 Advanced AI Integration:**
-    *   Uses **Gemini 3 Pro** for complex reasoning and synthesis.
-    *   Uses **Gemini 2.5 Flash** for rapid request classification and structured data extraction.
+    *   **Gemini 3 Pro:** Handles complex reasoning and synthesis for health insights.
+    *   **Gemini 2.5 Flash:** Ensures rapid request classification and structured data extraction.
 *   **🔒 Secure Dashboard:**
     *   User authentication via Supabase Auth.
     *   Encrypted storage for sensitive health history.
@@ -55,27 +71,33 @@
 
 ---
 
+## 📋 Prerequisites
+
+Before you begin, ensure you have the following installed:
+*   [Node.js](https://nodejs.org/) (v18 or higher)
+*   [npm](https://www.npmjs.com/) or [yarn](https://yarnpkg.com/)
+*   A [Google Cloud Project](https://console.cloud.google.com/) with the **Gemini API** enabled.
+*   A [Supabase](https://supabase.com/) project.
+
+---
+
 ## ⚙️ Installation & Setup
 
-### 1. Prerequisites
-*   Node.js (v18+)
-*   npm or yarn
-*   A Google Cloud Project with the **Gemini API** enabled.
-*   A **Supabase** project.
+Follow these steps to get the project running locally.
 
-### 2. Clone the Repository
+### 1. Clone the Repository
 ```bash
 git clone https://github.com/your-username/healthtrackai.git
 cd healthtrackai
 ```
 
-### 3. Install Dependencies
+### 2. Install Dependencies
 ```bash
 npm install
 ```
 
-### 4. Environment Configuration
-Create a `.env` file in the root directory:
+### 3. Environment Configuration
+Create a `.env` file in the root directory and add your API keys. You can duplicate a `.env.example` if available, or use the template below:
 
 ```env
 # Google Gemini API
@@ -86,10 +108,35 @@ VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
 ```
 
+### 4. Database Setup
+Set up the required tables and storage in your Supabase project. See the [Database Schema](#-database-schema-supabase) section for the SQL scripts.
+
 ### 5. Run Development Server
 ```bash
 npm run dev
 ```
+The application will start at `http://localhost:5173`.
+
+---
+
+## 💡 Usage Guide
+
+### Getting Started
+1.  **Sign Up/Login**: Create an account using the authentication page.
+2.  **Dashboard**: Once logged in, you'll see your dashboard with past reports and analytics.
+
+### Creating a New Analysis
+1.  Click **"New Analysis"** or **"Start Analysis"**.
+2.  **Describe Symptoms**: Type your symptoms in the text box.
+3.  **Upload Media** (Optional):
+    *   **Audio**: Record or upload a voice note describing how you feel.
+    *   **Image**: Upload photos of visible symptoms (e.g., rashes).
+    *   **Document**: Upload PDF lab reports for analysis.
+4.  **Submit**: Click the send button. The AI will analyze the inputs and provide a summary, details, and recommendations.
+
+### Managing Reports
+*   **View History**: Click on any past report in the dashboard to view the full details.
+*   **Export PDF**: Use the export button to download a summary to share with your healthcare provider.
 
 ---
 
@@ -181,10 +228,10 @@ Create a new public bucket named `health_files` in Supabase Storage.
 
 ## 🛡️ Security & Privacy
 
-*   **Prompt Injection Protection:** All user inputs are wrapped in XML tags (`<user_input>`) before being sent to the LLM to prevent prompt injection attacks.
-*   **Session Management:** Automatic logout triggered after **15 minutes of inactivity** (no mouse movements or key presses) to protect sensitive health data on shared devices.
-*   **File Validation:** All uploads are validated via Magic Bytes signatures (in `supabaseClient.ts`) to ensure file integrity (e.g., ensuring a `.jpg` is actually an image).
-*   **RLS (Row Level Security):** Database policies ensure users can only access their own health records.
+*   **Prompt Injection Protection:** User inputs are sanitized and wrapped in XML tags (`<user_input>`) before processing.
+*   **Session Management:** Automatic logout after **15 minutes of inactivity** to protect sensitive data.
+*   **File Validation:** Uploads are validated via Magic Bytes signatures to ensure file integrity.
+*   **Row Level Security (RLS):** Database policies strictly enforce that users can only access their own records.
 
 ---
 
@@ -192,39 +239,53 @@ Create a new public bucket named `health_files` in Supabase Storage.
 
 ```
 /
-├── public/              # Static assets
-├── src/
-│   ├── backend/         # Supabase client & Logic (Singleton)
-│   ├── components/      # React UI Components (Dashboard, Chat, Forms)
-│   ├── context/         # Auth Context & Global State
-│   ├── services/        # API integrations (Gemini, Supabase wrappers)
-│   ├── types/           # TypeScript interfaces
-│   ├── utils/           # Helper functions (Parsers, Formatters)
-│   ├── App.tsx          # Main Routing & Layout Logic
-│   └── index.tsx        # Entry point
-├── index.html           # HTML Template (CSP Headers included)
-├── metadata.json        # Project metadata
-└── README.md            # Documentation
+├── components/          # React UI Components (Dashboard, Chat, Forms)
+├── context/             # Auth Context & Global State
+├── services/            # API integrations (Gemini, Supabase wrappers)
+├── utils/               # Helper functions (Parsers, Formatters)
+├── App.tsx              # Main Routing & Layout Logic
+├── Layout.tsx           # App Shell & Navigation
+├── constants.ts         # Global Constants
+├── types.ts             # TypeScript interfaces
+├── index.tsx            # Entry point
+└── index.html           # HTML Template
 ```
+
+---
+
+## ❓ Troubleshooting
+
+### Common Issues
+
+*   **Authentication Failed:**
+    *   Ensure your `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are correct in the `.env` file.
+    *   Check if Email Auth provider is enabled in your Supabase dashboard.
+
+*   **AI Analysis Not Working:**
+    *   Verify your `API_KEY` for Gemini is valid and has quota available.
+    *   Check the browser console for specific error messages regarding the API call.
+
+*   **Database Errors:**
+    *   Ensure you have run the SQL scripts in the [Database Schema](#-database-schema-supabase) section.
+    *   Verify RLS policies if you are unable to view your own data.
 
 ---
 
 ## 🤝 Contributing
 
-1.  Fork the repository.
-2.  Create your feature branch (`git checkout -b feature/AmazingFeature`).
-3.  Commit your changes (`git commit -m 'Add some AmazingFeature'`).
-4.  Push to the branch (`git push origin feature/AmazingFeature`).
-5.  Open a Pull Request.
+Contributions are welcome! Please follow these steps to contribute:
+
+1.  **Fork the repository**.
+2.  Create your feature branch: `git checkout -b feature/AmazingFeature`.
+3.  Commit your changes: `git commit -m 'Add some AmazingFeature'`.
+4.  Push to the branch: `git push origin feature/AmazingFeature`.
+5.  Open a **Pull Request**.
 
 ---
 
-## 🔮 Future Roadmap
+## 📄 License
 
-*   **Multi-language Support:** Native French/Spanish support via Gemini translation.
-*   **Clinician Portal:** A dedicated view for doctors to review patient-shared reports.
-*   **Wearable Integration:** Ingest Apple Health / Google Fit data.
+Distributed under the MIT License. See `LICENSE` for more information.
 
 ---
 *Built with ❤️ using Google AI Studio*
-
