@@ -12,6 +12,23 @@ interface DashboardProps {
   onNewAnalysis?: () => void;
 }
 
+// Notification Banner Component
+const NotificationBanner = ({ type, message, onClose }: { type: 'success' | 'error', message: string, onClose: () => void }) => (
+  <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-[60] px-6 py-3 rounded-xl shadow-lg border flex items-center gap-3 animate-fade-in-down ${
+    type === 'success' 
+      ? 'bg-green-50 text-green-800 border-green-200 dark:bg-green-900/80 dark:text-green-100 dark:border-green-800' 
+      : 'bg-red-50 text-red-800 border-red-200 dark:bg-red-900/80 dark:text-red-100 dark:border-red-800'
+  }`}>
+    {type === 'success' ? (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+    ) : (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+    )}
+    <span className="font-medium text-sm">{message}</span>
+    <button onClick={onClose} className="ml-2 hover:opacity-70"><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
+  </div>
+);
+
 export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalysis }) => {
   const { user, profile, isAdmin } = useAuth();
   const [reports, setReports] = useState<HealthReport[]>([]);
@@ -22,6 +39,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
   
   // Admin State
   const [isAdminMode, setIsAdminMode] = useState(false);
+
+  // Notification State
+  const [notification, setNotification] = useState<{ type: 'success' | 'error', message: string } | null>(null);
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -44,17 +64,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
   const [editConcern, setEditConcern] = useState<HealthRiskLevel>('Medium');
   const [isSaving, setIsSaving] = useState(false);
 
+  // Helper to show notifications
+  const showNotification = (type: 'success' | 'error', message: string) => {
+    setNotification({ type, message });
+    setTimeout(() => setNotification(null), 4000);
+  };
+
   // --- Data Fetching ---
   const fetchHistory = async () => {
     if (!user) return;
     
-    // Unique cache key for this user
     const CACHE_KEY = `healthtrackai_cached_reports_${user.id}`;
 
     try {
       setLoading(true);
       
-      // Check online status explicitly
       if (!navigator.onLine) {
         throw new Error("Device is offline");
       }
@@ -63,15 +87,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
       if (isAdmin && isAdminMode) {
         data = await getAllHealthReports();
       } else {
-        // SECURITY UPDATE: No longer passing user.id argument.
-        // The service now strictly derives the ID from the session.
         data = await getHealthReports();
       }
       
       setReports(data || []);
       setIsOfflineMode(false);
 
-      // Cache the last 5 reports if not in admin mode (personal data only)
       if (!isAdminMode && data && data.length > 0) {
         try {
           const toCache = data.slice(0, 5);
@@ -84,18 +105,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
     } catch (err) {
       console.warn("Failed to load history from network, attempting cache...", err);
       
-      // Offline / Error Fallback
       try {
         const cached = localStorage.getItem(CACHE_KEY);
         if (cached) {
-          // SECURITY: Use Safe Parse to prevent crash on corrupted cache
           const parsed = safeJsonParse<HealthReport[]>(cached, validateHealthReportList);
           
           if (parsed) {
             setReports(parsed);
             setIsOfflineMode(true);
           } else {
-            // If cache is corrupted, clear it to self-heal
             localStorage.removeItem(CACHE_KEY);
             setReports([]);
           }
@@ -113,8 +131,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
 
   useEffect(() => {
     fetchHistory();
-    
-    // Listen for network recovery
     const handleOnline = () => fetchHistory();
     window.addEventListener('online', handleOnline);
     return () => window.removeEventListener('online', handleOnline);
@@ -124,7 +140,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
   const stats = useMemo(() => {
     const total = reports.length;
     
-    // Type Distribution
     const types = {
       Image: reports.filter(r => r.input_type?.toLowerCase().includes('image')).length,
       Audio: reports.filter(r => r.input_type?.toLowerCase().includes('audio')).length,
@@ -132,19 +147,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
       Doc: reports.filter(r => r.input_type?.toLowerCase().includes('document')).length,
     };
 
-    // Risk Stats
     const risks = {
       High: reports.filter(r => (r.concern_override || r.preliminary_concern) === 'High').length,
       Medium: reports.filter(r => (r.concern_override || r.preliminary_concern) === 'Medium').length,
       Low: reports.filter(r => (r.concern_override || r.preliminary_concern) === 'Low').length,
     };
 
-    // Determine Avg Concern
     let avgConcern = 'Low';
     if (risks.High > risks.Medium && risks.High > risks.Low) avgConcern = 'High';
     else if (risks.Medium > risks.Low) avgConcern = 'Medium';
 
-    // Mock Monthly Data (Grouping by month)
     const last6Months = Array.from({ length: 6 }).map((_, i) => {
       const d = new Date();
       d.setMonth(d.getMonth() - i);
@@ -188,7 +200,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
     if (!selectedReport) return;
     
     if (isOfflineMode) {
-      alert("You cannot edit reports while offline.");
+      showNotification('error', "Offline: Cannot save changes.");
       return;
     }
 
@@ -203,14 +215,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
       setReports(prev => prev.map(r => r.id === selectedReport.id ? updatedReport : r));
       setSelectedReport(updatedReport);
       setIsEditMode(false);
-    } catch (err) { alert("Failed to save changes."); } finally { setIsSaving(false); }
+      showNotification('success', "Changes saved successfully.");
+    } catch (err: any) { 
+      showNotification('error', err.message || "Failed to save changes.");
+    } finally { setIsSaving(false); }
   };
 
   const handleDelete = async () => {
     if (!selectedReport) return;
 
     if (isOfflineMode) {
-      alert("You cannot delete reports while offline.");
+      showNotification('error', "Offline: Cannot delete reports.");
       return;
     }
 
@@ -219,7 +234,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
       await deleteHealthReport(selectedReport.id);
       setReports(prev => prev.filter(r => r.id !== selectedReport.id));
       handleCloseModal();
-    } catch (err) { alert("Failed to delete report."); } finally { setIsDeleting(false); }
+      showNotification('success', "Report deleted successfully.");
+    } catch (err: any) { 
+      showNotification('error', err.message || "Failed to delete report.");
+    } finally { setIsDeleting(false); }
   };
 
   // --- Filtering ---
@@ -258,9 +276,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
     return <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>;
   };
 
-  // --- SVG Charts Helpers ---
+  // ... (Keep DonutChart and BarChart logic as is)
   const DonutChart = () => {
-    // ... (same implementation)
+    // ... same implementation as before ...
     const data = [
       { label: 'Image', value: stats.types.Image, color: '#3b82f6' }, // blue-500
       { label: 'Audio', value: stats.types.Audio, color: '#22c55e' }, // green-500
@@ -319,6 +337,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
   };
 
   const BarChart = () => {
+    // ... same implementation as before ...
     const maxVal = Math.max(...stats.timeline.map(t => t.count), 1);
     
     return (
@@ -358,10 +377,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
   };
 
   return (
-    <div className="flex h-[calc(100vh-64px)] bg-gray-50 dark:bg-[#0f1117] text-gray-900 dark:text-gray-200 font-sans overflow-hidden transition-colors">
+    <div className="flex h-[calc(100vh-64px)] bg-gray-50 dark:bg-[#0f1117] text-gray-900 dark:text-gray-200 font-sans overflow-hidden transition-colors relative">
       
+      {/* Notification Banner */}
+      {notification && (
+        <NotificationBanner 
+          type={notification.type} 
+          message={notification.message} 
+          onClose={() => setNotification(null)} 
+        />
+      )}
+
       {/* Sidebar Filters */}
       <aside className="w-64 bg-white dark:bg-[#161b22] border-r border-gray-200 dark:border-gray-800 p-6 flex-shrink-0 hidden md:block overflow-y-auto transition-colors">
+        {/* ... (Existing Sidebar Logic) ... */}
         <RoleGuard allowedRoles={['admin', 'super_admin']}>
            <div className="mb-8 p-3 bg-gray-100 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
              <div className="flex items-center justify-between mb-2">
@@ -569,7 +598,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
                       <td className="p-4 pr-6 text-right">
                          <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button 
-                              onClick={(e) => { e.stopPropagation(); handleOpenReport(row); }}
+                              onClick={(e) => { e.stopPropagation(); onViewDetails?.(row); }}
                               className="text-xs bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 px-3 py-1.5 rounded-lg transition-colors font-medium"
                             >
                               View

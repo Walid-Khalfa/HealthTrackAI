@@ -33,8 +33,8 @@ export const createPendingReport = async (
   attachments: Attachment[]
 ): Promise<HealthReport> => {
   // Get current user from session
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error("User must be authenticated to create a report.");
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError || !user) throw new Error("Authentication session invalid. Please reload or sign in again.");
 
   // SECURITY: Validate input length (DoS Prevention)
   const safeInputText = validateInputLength(inputText, 'text');
@@ -69,11 +69,17 @@ export const createPendingReport = async (
     .single();
 
   if (error) {
-    if (error.code !== '42501' && error.code !== 'P0001') {
-      console.error('Error creating pending report:', error.message);
-      logger.log('API_ERROR_CRITICAL', 'HIGH', `DB Insert Failure: ${error.message}`, { table: 'health_reports' });
+    if (error.code === '42501') {
+       // RLS Error
+       throw new Error("Permission denied: You cannot create reports.");
     }
-    throw error;
+    if (error.message.includes("fetch")) {
+       throw new Error("Network error: Unable to connect to the database.");
+    }
+    
+    console.error('Error creating pending report:', error.message);
+    logger.log('API_ERROR_CRITICAL', 'HIGH', `DB Insert Failure: ${error.message}`, { table: 'health_reports' });
+    throw new Error(`Failed to save history: ${error.message}`);
   }
   return data;
 };
@@ -86,8 +92,8 @@ export const createPendingReport = async (
 export const uploadReportFiles = async (
   reportId: string,
   attachments: Attachment[]
-) => {
-  if (attachments.length === 0) return;
+): Promise<{ successCount: number; failures: string[] }> => {
+  if (attachments.length === 0) return { successCount: 0, failures: [] };
 
   // SECURITY: Enforce Max Files Count
   if (attachments.length > MAX_FILES_PER_REPORT) {
@@ -99,27 +105,22 @@ export const uploadReportFiles = async (
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("User must be authenticated to upload files.");
 
+  const failures: string[] = [];
+  let successCount = 0;
+
   const uploadPromises = attachments.map(async (att) => {
     try {
       const blob = await base64ToBlob(att.data, att.mimeType);
 
       // SECURITY: Enforce Max File Size
       if (blob.size > MAX_FILE_SIZE_BYTES) {
-        logger.log('FILE_UPLOAD_VIOLATION', 'MEDIUM', `File size exceeded: ${att.name} (${blob.size} bytes)`);
-        throw new Error(`Security Violation: File ${att.name} exceeds maximum allowed size of 10MB.`);
+        throw new Error(`Exceeds 10MB limit`);
       }
 
       // SECURITY: Validate File Signature (Magic Numbers)
       const isValid = await validateFileSignature(blob, att.mimeType);
       if (!isValid) {
-        // AUDIT: Critical security event - potential malware upload attempt
-        logger.log(
-          'FILE_UPLOAD_VIOLATION', 
-          'CRITICAL', 
-          `Magic Byte mismatch. Pretended to be ${att.mimeType} but signature invalid.`, 
-          { fileName: att.name, claimedMime: att.mimeType }
-        );
-        throw new Error(`Security Alert: File signature does not match MIME type ${att.mimeType}`);
+        throw new Error(`Invalid file signature for ${att.mimeType}`);
       }
 
       const fileExt = att.mimeType.split('/')[1] || 'bin';
@@ -153,27 +154,36 @@ export const uploadReportFiles = async (
         }]);
 
       if (dbError) throw dbError;
+      
+      successCount++;
 
     } catch (err: any) {
-      // Re-throw security violations to stop process if critical
-      if (err.message.includes('Security Violation') || err.message.includes('Security Alert')) {
-        throw err;
+      const msg = err.message || "Unknown upload error";
+      const fileName = att.name || "File";
+      
+      // Re-throw critical security violations to alert the UI clearly
+      if (msg.includes('Security Violation') || msg.includes('Security Alert')) {
+         failures.push(`${fileName}: ${msg}`);
+         return; 
       }
 
       if (
         err.statusCode === '403' || 
         err.code === '42501' || 
-        (err.message && err.message.includes('row-level security'))
+        (msg && msg.includes('row-level security'))
       ) {
-        console.warn(`Skipped upload for ${att.name}: Backend storage permissions not configured.`);
+        console.warn(`Skipped upload for ${fileName}: Backend storage permissions not configured.`);
+        failures.push(`${fileName}: Storage permission denied.`);
       } else {
         console.error(`Failed to upload file ${att.id}:`, err);
-        logger.log('SYSTEM_ERROR', 'LOW', `File upload failure: ${err.message}`);
+        logger.log('SYSTEM_ERROR', 'LOW', `File upload failure: ${msg}`);
+        failures.push(`${fileName}: ${msg}`);
       }
     }
   });
 
   await Promise.all(uploadPromises);
+  return { successCount, failures };
 };
 
 /**
@@ -208,7 +218,8 @@ export const updateReportWithAIResult = async (
     if (error.code !== '42501' && error.code !== 'P0001') {
       console.error('Error updating report with AI result:', error.message);
     }
-    throw error;
+    // We don't throw here to avoid crashing the UI after AI generation was successful
+    console.warn("Note: AI result was generated but could not be persisted to history.");
   }
 };
 
@@ -237,7 +248,7 @@ export const updateReportDetails = async (
 
   if (error) {
     console.error('Error updating report details:', error);
-    throw error;
+    throw new Error("Failed to update report. Please check your connection.");
   }
 };
 
@@ -264,7 +275,7 @@ export const deleteHealthReport = async (reportId: string) => {
 
   if (error) {
     console.error('Error deleting report:', error);
-    throw error;
+    throw new Error("Failed to delete report.");
   }
 };
 
@@ -287,6 +298,7 @@ export const getHealthReports = async () => {
     if (error.code !== '42501' && error.code !== 'P0001') {
        console.error('Error fetching health reports:', error);
     }
+    // Return empty array on error so dashboard doesn't crash, let UI handle empty state
     return [];
   }
   return data as HealthReport[];
@@ -373,7 +385,7 @@ export const upgradeToPro = async () => {
   const { error } = await supabase.rpc('upgrade_to_pro');
   if (error) {
     console.error("Upgrade failed:", error);
-    throw error;
+    throw new Error("Upgrade failed. Please check your connection or try again later.");
   }
 };
 

@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Message, MessageRole, Attachment, HealthReport, HealthRiskLevel } from './types';
 import { generateHealthAnalysis, classifyHealthRequest } from './services/gemini';
@@ -137,9 +138,6 @@ const AppContent = () => {
         alert("Please wait a moment before sending another request. Rate limit exceeded.");
         return;
       }
-    } else {
-      // Basic IP/Session based limit for non-logged in users could be added here
-      // For now, we force login for analysis so 'user' is usually present
     }
 
     if (view === 'form') {
@@ -158,30 +156,48 @@ const AppContent = () => {
 
     try {
       let reportId: string | null = null;
+      let uploadErrors: string[] = [];
+
+      // 1. DATABASE & UPLOAD PHASE
       if (user) {
         try {
-          // SECURITY UPDATE: Removed user.id. Logic is now session-based.
           const report = await createPendingReport(text, attachments);
           reportId = report.id;
-          // SECURITY UPDATE: Removed user.id. Logic is now session-based.
-          await uploadReportFiles(reportId, attachments);
-        } catch (dbErr: any) {
-          console.warn("History save unavailable or restricted:", dbErr.message);
-          // If security violation (e.g., file too big), stop here
-          if (dbErr.message.includes('Security Violation')) {
-             const errorMsg: Message = {
+          
+          const { successCount, failures } = await uploadReportFiles(reportId, attachments);
+          uploadErrors = failures;
+
+          // Feedback if partial upload failure
+          if (failures.length > 0) {
+             const warningMsg: Message = {
                id: (Date.now() + 1).toString(),
                role: MessageRole.Model,
-               content: `❌ Request Blocked: ${dbErr.message}`,
+               content: `⚠️ **Upload Warning:** ${successCount} file(s) uploaded successfully, but ${failures.length} failed.\n\nFailed files:\n${failures.map(f => `- ${f}`).join('\n')}\n\nContinuing analysis with available data...`,
                timestamp: Date.now(),
              };
-             setMessages(prev => [...prev, errorMsg]);
-             setIsLoading(false);
-             return;
+             setMessages(prev => [...prev, warningMsg]);
           }
+
+        } catch (dbErr: any) {
+          console.warn("History/Upload failed:", dbErr.message);
+          
+          // CRITICAL: If createPendingReport fails, we might still want to give AI analysis (demo mode),
+          // OR we block it. Here we block if it's a security violation, otherwise warn.
+          if (dbErr.message.includes('Security Violation')) {
+             throw dbErr; // Stop execution
+          }
+          
+          const errorMsg: Message = {
+             id: (Date.now() + 2).toString(),
+             role: MessageRole.Model,
+             content: `⚠️ **System Note:** ${dbErr.message}\nYour analysis will be generated, but it may not be saved to your history.`,
+             timestamp: Date.now(),
+          };
+          setMessages(prev => [...prev, errorMsg]);
         }
       }
 
+      // 2. AI GENERATION PHASE
       const historyContext = messages
         .filter(m => m.role === MessageRole.Model)
         .map(m => `AI Response: ${m.content}`)
@@ -193,17 +209,13 @@ const AppContent = () => {
         classifyHealthRequest(text, attachments)
       ]);
 
+      // 3. PERSISTENCE PHASE (Update report with results)
       if (reportId) {
-        // Parse the FULL text response to extract the concern level that matches the PDF/Chat view
         const parsedReport = parseHealthReport(responseText);
         
-        // Normalize 'Moderate' (from parser) to 'Medium' (for DB schema)
         let synchronizedConcern = parsedReport.riskLevel as string;
         if (synchronizedConcern === 'Moderate') synchronizedConcern = 'Medium';
         
-        // Since 'Unknown' is removed from HealthRiskLevel and defaults are handled in parsers,
-        // we skip the fallback check against 'Unknown'.
-
         const summaryMatch = responseText.match(/### 1\. Executive Summary\s*([\s\S]*?)(?=### 2|$)/i);
         const aiSummary = summaryMatch ? summaryMatch[1].trim() : responseText.slice(0, 200) + '...';
         
@@ -218,7 +230,7 @@ const AppContent = () => {
             summary: aiSummary,
             details: aiDetails,
             recommendations: aiRecs,
-            preliminary_concern: synchronizedConcern as HealthRiskLevel, // Use synchronized concern
+            preliminary_concern: synchronizedConcern as HealthRiskLevel,
             input_type: classification.analysis_type,
             full_response: responseText
           });
@@ -228,19 +240,30 @@ const AppContent = () => {
       }
 
       const aiMessage: Message = {
-        id: (Date.now() + 1).toString(),
+        id: (Date.now() + 3).toString(),
         role: MessageRole.Model,
         content: responseText,
         timestamp: Date.now(),
       };
       setMessages(prev => [...prev, aiMessage]);
 
-    } catch (error) {
-      console.error("Failed to generate response", error);
+    } catch (error: any) {
+      console.error("Workflow failed", error);
+      
+      let friendlyError = "I apologize, but I encountered an unexpected error. Please try again.";
+      
+      // Map known errors
+      if (error.message.includes("API Key")) friendlyError = "Configuration Error: The system is missing a valid API Key.";
+      else if (error.message.includes("quota")) friendlyError = "System Overload: Usage limits exceeded. Please wait a moment.";
+      else if (error.message.includes("Safety")) friendlyError = "Safety Block: The AI detected content that violates safety policies.";
+      else if (error.message.includes("Security Violation")) friendlyError = `⛔ **Security Alert:** ${error.message.replace('Security Violation:', '')}`;
+      else if (error.message.includes("Network")) friendlyError = "Connection Failed: Please check your internet connection.";
+      else if (error.message) friendlyError = `Error: ${error.message}`;
+
       const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
+        id: (Date.now() + 4).toString(),
         role: MessageRole.Model,
-        content: "I apologize, but I encountered an error. Please try again.",
+        content: friendlyError,
         timestamp: Date.now(),
       };
       setMessages(prev => [...prev, errorMessage]);
