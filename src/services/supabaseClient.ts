@@ -1,34 +1,50 @@
+
 import { createClient } from '@supabase/supabase-js';
 import { HealthReport, Attachment, AttachmentType, HealthRiskLevel, UserProfile } from '../types';
+import { validateInputLength, MAX_FILE_SIZE_BYTES, MAX_FILES_PER_REPORT, getSecureUUID } from '../utils/security';
+import { logger } from './logger';
 
 // Helper to safely access environment variables without crashing in browser
-const getEnv = (key: string, fallback: string): string => {
+const getEnv = (key: string): string => {
   if (typeof process !== 'undefined' && process.env && process.env[key]) {
     return process.env[key] as string;
   }
-  return fallback;
+  return '';
 };
 
-// NOTE: In a production environment, these should be environment variables.
-const supabaseUrl = getEnv('SUPABASE_URL', 'https://cfdvtdqjxlequhnmknsk.supabase.co');
-const supabaseAnonKey = getEnv('SUPABASE_ANON_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNmZHZ0ZHFqeGxlcXVobm1rbnNrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjUxMDEyMDIsImV4cCI6MjA4MDY3NzIwMn0.uPQayxZ2bPLxWaVLqCYxVchRE85dk1nIeHp876KN4qA');
+// SECURITY: Configuration must come from environment variables.
+const supabaseUrl = getEnv('SUPABASE_URL');
+const supabaseAnonKey = getEnv('SUPABASE_ANON_KEY');
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.warn(
+    "Supabase credentials missing. Please set SUPABASE_URL and SUPABASE_ANON_KEY in your environment."
+  );
+}
+
+export const supabase = createClient(supabaseUrl || 'https://placeholder.supabase.co', supabaseAnonKey || 'placeholder');
 
 /**
  * 1. Create a pending report row.
+ * SECURITY: Derives userId from session to prevent IDOR.
  */
 export const createPendingReport = async (
-  userId: string,
   inputText: string,
   attachments: Attachment[]
 ): Promise<HealthReport> => {
+  // Get current user from session
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("User must be authenticated to create a report.");
+
+  // SECURITY: Validate input length (DoS Prevention)
+  const safeInputText = validateInputLength(inputText, 'text');
+
   const hasImages = attachments.some(a => a.type === AttachmentType.Image);
   const hasAudio = attachments.some(a => a.type === AttachmentType.Audio);
   const hasDocs = attachments.some(a => a.type === AttachmentType.Pdf);
 
   const inputTypes = [];
-  if (inputText) inputTypes.push('text');
+  if (safeInputText) inputTypes.push('text');
   if (hasImages) inputTypes.push('image');
   if (hasAudio) inputTypes.push('audio');
   if (hasDocs) inputTypes.push('document');
@@ -37,25 +53,25 @@ export const createPendingReport = async (
     .from('health_reports')
     .insert([
       {
-        user_id: userId,
-        input_text: inputText,
-        input_summary: inputText.slice(0, 100) + (inputText.length > 100 ? '...' : ''),
+        user_id: user.id, // Enforced from session
+        input_text: safeInputText,
+        input_summary: safeInputText.slice(0, 100) + (safeInputText.length > 100 ? '...' : ''),
         input_type: inputTypes.join(', ') || 'mixed',
         has_images: hasImages,
         has_audio: hasAudio,
         has_documents: hasDocs,
         status: 'pending',
-        preliminary_concern: 'Medium', // Defaulting to Medium as 'Unknown' is not in HealthRiskLevel
-        flagged: false, // Default unflagged
+        preliminary_concern: 'Medium',
+        flagged: false,
       }
     ])
     .select()
     .single();
 
   if (error) {
-    // Only log actual errors, not RLS/Permissions denials which are expected in demo mode
     if (error.code !== '42501' && error.code !== 'P0001') {
       console.error('Error creating pending report:', error.message);
+      logger.log('API_ERROR_CRITICAL', 'HIGH', `DB Insert Failure: ${error.message}`, { table: 'health_reports' });
     }
     throw error;
   }
@@ -63,38 +79,58 @@ export const createPendingReport = async (
 };
 
 /**
- * 2. Upload files to Storage and link them in `health_files`.
+ * 2. Upload files to Storage.
+ * SECURITY: Uses session ID for path construction to prevent path traversal/uploading to others' folders.
+ * SECURITY: Enforces MAX_FILE_SIZE and MAX_FILES_PER_REPORT (Insecure Design Prevention)
  */
 export const uploadReportFiles = async (
   reportId: string,
-  userId: string,
   attachments: Attachment[]
 ) => {
   if (attachments.length === 0) return;
 
+  // SECURITY: Enforce Max Files Count
+  if (attachments.length > MAX_FILES_PER_REPORT) {
+    logger.log('FILE_UPLOAD_VIOLATION', 'MEDIUM', 'Max files per report exceeded');
+    throw new Error(`Security Violation: Maximum ${MAX_FILES_PER_REPORT} files allowed per report.`);
+  }
+
+  // Get current user from session
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("User must be authenticated to upload files.");
+
   const uploadPromises = attachments.map(async (att) => {
     try {
-      // Convert Base64 to Blob
       const blob = await base64ToBlob(att.data, att.mimeType);
 
+      // SECURITY: Enforce Max File Size
+      if (blob.size > MAX_FILE_SIZE_BYTES) {
+        logger.log('FILE_UPLOAD_VIOLATION', 'MEDIUM', `File size exceeded: ${att.name} (${blob.size} bytes)`);
+        throw new Error(`Security Violation: File ${att.name} exceeds maximum allowed size of 10MB.`);
+      }
+
       // SECURITY: Validate File Signature (Magic Numbers)
-      // This prevents uploading .exe renamed as .jpg
       const isValid = await validateFileSignature(blob, att.mimeType);
       if (!isValid) {
+        // AUDIT: Critical security event - potential malware upload attempt
+        logger.log(
+          'FILE_UPLOAD_VIOLATION', 
+          'CRITICAL', 
+          `Magic Byte mismatch. Pretended to be ${att.mimeType} but signature invalid.`, 
+          { fileName: att.name, claimedMime: att.mimeType }
+        );
         throw new Error(`Security Alert: File signature does not match MIME type ${att.mimeType}`);
       }
 
       const fileExt = att.mimeType.split('/')[1] || 'bin';
       
-      // SECURITY: Use UUID for filename to prevent path traversal or overwrites
-      const secureFileName = `${getUUID()}.${fileExt}`;
-      
+      // SECURITY: Use CSPRNG UUID for filename
+      const secureFileName = `${getSecureUUID()}.${fileExt}`;
       const folder = att.type === AttachmentType.Image ? 'images' : att.type === AttachmentType.Audio ? 'audio' : 'documents';
       
-      // SECURITY: Enforce strict path structure including User ID
-      const filePath = `${folder}/${userId}/${reportId}/${secureFileName}`;
+      // SECURITY: Enforce strict path structure: folder/USER_ID/report_id/filename
+      const filePath = `${folder}/${user.id}/${reportId}/${secureFileName}`;
 
-      // Upload to Storage
       const { error: uploadError } = await supabase.storage
         .from('health_files')
         .upload(filePath, blob, {
@@ -104,12 +140,11 @@ export const uploadReportFiles = async (
 
       if (uploadError) throw uploadError;
 
-      // Insert record into health_files table
       const { error: dbError } = await supabase
         .from('health_files')
         .insert([{
           report_id: reportId,
-          user_id: userId,
+          user_id: user.id, // Enforced from session
           file_type: att.type === AttachmentType.Pdf ? 'document' : att.type,
           storage_path: filePath,
           original_name: att.name || 'untitled',
@@ -120,7 +155,11 @@ export const uploadReportFiles = async (
       if (dbError) throw dbError;
 
     } catch (err: any) {
-      // Handle RLS/Permission errors gracefully (common in demos)
+      // Re-throw security violations to stop process if critical
+      if (err.message.includes('Security Violation') || err.message.includes('Security Alert')) {
+        throw err;
+      }
+
       if (
         err.statusCode === '403' || 
         err.code === '42501' || 
@@ -129,8 +168,8 @@ export const uploadReportFiles = async (
         console.warn(`Skipped upload for ${att.name}: Backend storage permissions not configured.`);
       } else {
         console.error(`Failed to upload file ${att.id}:`, err);
+        logger.log('SYSTEM_ERROR', 'LOW', `File upload failure: ${err.message}`);
       }
-      // We allow other files to proceed
     }
   });
 
@@ -151,6 +190,7 @@ export const updateReportWithAIResult = async (
     full_response: string;
   }
 ) => {
+  // We don't check session explicitly here as RLS on 'update' will handle ownership check
   const { error } = await supabase
     .from('health_reports')
     .update({
@@ -168,9 +208,6 @@ export const updateReportWithAIResult = async (
     if (error.code !== '42501' && error.code !== 'P0001') {
       console.error('Error updating report with AI result:', error.message);
     }
-    try {
-        await supabase.from('health_reports').update({ status: 'failed' }).eq('id', reportId);
-    } catch (e) { /* ignore cleanup error */ }
     throw error;
   }
 };
@@ -186,9 +223,16 @@ export const updateReportDetails = async (
     concern_override?: HealthRiskLevel;
   }
 ) => {
+  // SECURITY: Validate inputs (DoS / Spam prevention)
+  const safeUpdates = {
+    ...updates,
+    custom_title: updates.custom_title ? validateInputLength(updates.custom_title, 'title') : undefined,
+    user_notes: updates.user_notes ? validateInputLength(updates.user_notes, 'text') : undefined,
+  };
+
   const { error } = await supabase
     .from('health_reports')
-    .update(updates)
+    .update(safeUpdates)
     .eq('id', reportId);
 
   if (error) {
@@ -201,19 +245,16 @@ export const updateReportDetails = async (
  * 5. Delete Report and Files (CRUD - Delete)
  */
 export const deleteHealthReport = async (reportId: string) => {
-  // 1. Get files linked to this report to delete from storage
   const { data: files } = await supabase
     .from('health_files')
     .select('storage_path')
     .eq('report_id', reportId);
 
-  // 2. Delete files from storage (if any)
   if (files && files.length > 0) {
     const paths = files.map(f => f.storage_path);
     await supabase.storage.from('health_files').remove(paths);
   }
 
-  // 3. Delete DB rows (Cascading delete handles health_files usually, but strict RLS might require explicit)
   await supabase.from('health_files').delete().eq('report_id', reportId);
   
   const { error } = await supabase
@@ -228,14 +269,17 @@ export const deleteHealthReport = async (reportId: string) => {
 };
 
 /**
- * Helper: Fetch History
- * If userId is provided, filter by it. If not (and admin), fetch all via RLS.
+ * Helper: Fetch User's Own History
+ * SECURITY: Removed userId argument. Always fetches for current session user.
  */
-export const getHealthReports = async (userId: string) => {
+export const getHealthReports = async () => {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+
   const { data, error } = await supabase
     .from('health_reports')
     .select('*')
-    .eq('user_id', userId)
+    .eq('user_id', user.id) // Enforced from session
     .order('created_at', { ascending: false })
     .limit(50);
 
@@ -252,6 +296,7 @@ export const getHealthReports = async (userId: string) => {
  * Helper: Fetch ALL reports (Admin only)
  */
 export const getAllHealthReports = async () => {
+  // The security here relies entirely on RLS policies for the 'admin' role.
   const { data, error } = await supabase
     .from('health_reports')
     .select('*')
@@ -286,7 +331,6 @@ export const getUserProfile = async (userId: string): Promise<UserProfile | null
     .single();
 
   if (error) {
-    // Only log if it's NOT a "Row not found" error (PGRST116)
     if (error.code !== 'PGRST116') {
        console.error('Error fetching profile:', error);
     }
@@ -297,15 +341,25 @@ export const getUserProfile = async (userId: string): Promise<UserProfile | null
 
 /**
  * Update User Profile
+ * SECURITY: Removed userId argument. Updates current user only.
  */
-export const updateUserProfile = async (userId: string, updates: { full_name?: string }) => {
+export const updateUserProfile = async (updates: { full_name?: string }) => {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Not authenticated");
+
+  // SECURITY: Validate Name Length
+  const safeUpdates = {
+    ...updates,
+    full_name: updates.full_name ? validateInputLength(updates.full_name, 'title') : undefined
+  };
+
   const { error } = await supabase
     .from('profiles')
     .update({ 
-      ...updates, 
+      ...safeUpdates, 
       updated_at: new Date().toISOString() 
     })
-    .eq('id', userId);
+    .eq('id', user.id); // Enforced from session
 
   if (error) {
     throw error;
@@ -327,7 +381,6 @@ export const upgradeToPro = async () => {
 // --- Utilities ---
 
 const base64ToBlob = async (base64Data: string, contentType: string): Promise<Blob> => {
-  // Strip data URI prefix if present
   const base64 = base64Data.replace(/^data:.*,/, '');
   
   const byteCharacters = atob(base64);
@@ -349,7 +402,8 @@ const base64ToBlob = async (base64Data: string, contentType: string): Promise<Bl
 };
 
 /**
- * SECURITY: Verify file magic numbers to prevent malicious uploads
+ * SECURITY: Verify file magic numbers to prevent malicious uploads (SSRF/XSS via SVG)
+ * IMPORTANT: Default behavior must be FALSE (Deny All) for security.
  */
 const validateFileSignature = async (blob: Blob, mimeType: string): Promise<boolean> => {
   const arr = new Uint8Array(await blob.slice(0, 4).arrayBuffer());
@@ -358,7 +412,7 @@ const validateFileSignature = async (blob: Blob, mimeType: string): Promise<bool
       header += arr[i].toString(16).toUpperCase().padStart(2, '0');
   }
 
-  // Simple Magic Number Check
+  // Strict Allowlist Check
   switch(mimeType) {
     case 'image/jpeg':
       return header.startsWith('FFD8FF');
@@ -369,16 +423,10 @@ const validateFileSignature = async (blob: Blob, mimeType: string): Promise<bool
     case 'audio/mpeg': // MP3 ID3
       return header.startsWith('494433') || header.startsWith('FFF'); 
     default:
-      return true; 
+      // SECURITY: REJECT ALL UNKNOWN TYPES (e.g. SVG which can cause XSS/SSRF)
+      console.warn(`Blocked upload of unsupported type: ${mimeType}`);
+      return false; 
   }
 };
 
-const getUUID = () => {
-  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-    return crypto.randomUUID();
-  }
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-    var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
-    return v.toString(16);
-  });
-}
+export { getSecureUUID } from '../utils/security';

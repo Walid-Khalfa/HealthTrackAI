@@ -4,10 +4,11 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     
-    <!-- SECURITY: Content Security Policy -->
+    <!-- SECURITY: Content Security Policy & Force HTTPS -->
     <meta http-equiv="Content-Security-Policy" content="
+      upgrade-insecure-requests;
       default-src 'self'; 
-      script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://aistudiocdn.com https://esm.sh https://cdnjs.cloudflare.com https: blob: data:; 
+      script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://aistudiocdn.com https://esm.sh https://cdnjs.cloudflare.com blob: data:; 
       worker-src 'self' blob: data:;
       style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; 
       font-src 'self' https://fonts.gstatic.com; 
@@ -17,8 +18,13 @@
     ">
 
     <title>HealthTrackAI</title>
+    <!-- NOTE: cdn.tailwindcss.com is used for runtime styling in this no-build environment. 
+         In a strict production CI/CD pipeline, CSS should be compiled at build time. -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    
+    <!-- PDF Generation Library - Version 0.10.1 (Pinned) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" integrity="sha512-GsLlZN/3F2ErC5ifS5QtgpiJtWd43JWSuIgh7mbzZ8zBps+dvLusV+eNQATqgA/HdeKFVgA5v3S/cIrLF7QnIg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    
     <script>
       tailwind.config = {
         darkMode: 'class',
@@ -54,13 +60,14 @@
         }
       }
     </script>
+  <!-- SECURITY: Exact Version Pinning (No carets ^ or tildes ~) to ensure stability and integrity -->
   <script type="importmap">
 {
   "imports": {
-    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.1/",
-    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.31.0",
-    "react/": "https://aistudiocdn.com/react@^19.2.1/",
-    "react": "https://aistudiocdn.com/react@^19.2.1",
+    "react-dom/": "https://aistudiocdn.com/react-dom@19.2.1/",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@1.31.0",
+    "react/": "https://aistudiocdn.com/react@19.2.1/",
+    "react": "https://aistudiocdn.com/react@19.2.1",
     "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2.45.4"
   }
 }

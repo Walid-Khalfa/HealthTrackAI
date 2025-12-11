@@ -1,9 +1,11 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { HealthReport, HealthRiskLevel } from '../types';
 import { getHealthReports, getAllHealthReports, updateReportDetails, deleteHealthReport } from '../services/supabaseClient';
 import { Button } from './Button';
 import { useAuth } from '../context/AuthContext';
 import { RoleGuard } from './RoleGuard';
+import { safeJsonParse, validateHealthReportList } from '../utils/security';
 
 interface DashboardProps {
   onViewDetails?: (report: HealthReport) => void;
@@ -61,7 +63,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
       if (isAdmin && isAdminMode) {
         data = await getAllHealthReports();
       } else {
-        data = await getHealthReports(user.id);
+        // SECURITY UPDATE: No longer passing user.id argument.
+        // The service now strictly derives the ID from the session.
+        data = await getHealthReports();
       }
       
       setReports(data || []);
@@ -84,14 +88,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
       try {
         const cached = localStorage.getItem(CACHE_KEY);
         if (cached) {
-          const parsed = JSON.parse(cached);
-          setReports(parsed);
-          setIsOfflineMode(true);
+          // SECURITY: Use Safe Parse to prevent crash on corrupted cache
+          const parsed = safeJsonParse<HealthReport[]>(cached, validateHealthReportList);
+          
+          if (parsed) {
+            setReports(parsed);
+            setIsOfflineMode(true);
+          } else {
+            // If cache is corrupted, clear it to self-heal
+            localStorage.removeItem(CACHE_KEY);
+            setReports([]);
+          }
         } else {
           setReports([]);
         }
       } catch (cacheErr) {
-        console.error("Cache parse error", cacheErr);
+        console.error("Cache system error", cacheErr);
         setReports([]);
       }
     } finally {
@@ -248,6 +260,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
 
   // --- SVG Charts Helpers ---
   const DonutChart = () => {
+    // ... (same implementation)
     const data = [
       { label: 'Image', value: stats.types.Image, color: '#3b82f6' }, // blue-500
       { label: 'Audio', value: stats.types.Audio, color: '#22c55e' }, // green-500
@@ -270,13 +283,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
            <svg viewBox="0 0 100 100" className="transform -rotate-90 w-full h-full">
              {data.map((slice, i) => {
                const percent = slice.value / total;
-               const dashArray = `${percent * 314} 314`; // 2 * pi * r (r=50) ~= 314
+               const dashArray = `${percent * 314} 314`; 
                const offset = cumulativePercent * 314;
                cumulativePercent += percent;
                return (
                  <circle
                    key={i}
-                   cx="50" cy="50" r="40" // radius 40
+                   cx="50" cy="50" r="40"
                    fill="transparent"
                    stroke={slice.color}
                    strokeWidth="16"
@@ -287,19 +300,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
                );
              })}
            </svg>
-           {/* Center Text */}
            <div className="absolute inset-0 flex flex-col items-center justify-center">
              <span className="text-sm font-bold text-gray-400">Total</span>
-             <span className="text-2xl font-bold text-white">{total}</span>
+             <span className="text-2xl font-bold text-gray-900 dark:text-white">{total}</span>
            </div>
         </div>
         
-        {/* Legend */}
         <div className="space-y-2">
            {data.map(d => (
              <div key={d.label} className="flex items-center gap-2">
                 <div className="w-3 h-3 rounded-full" style={{ backgroundColor: d.color }}></div>
-                <span className="text-xs text-gray-400">{d.label} ({Math.round(d.value/total*100)}%)</span>
+                <span className="text-xs text-gray-500 dark:text-gray-400">{d.label} ({Math.round(d.value/total*100)}%)</span>
              </div>
            ))}
         </div>
@@ -322,7 +333,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
                </div>
                
                {/* Stacked Bar */}
-               <div className="w-full max-w-[24px] bg-gray-700/30 rounded-t-sm relative overflow-hidden flex flex-col justify-end" style={{ height: `${Math.max(height, 5)}%` }}>
+               <div className="w-full max-w-[24px] bg-gray-200 dark:bg-gray-700/30 rounded-t-sm relative overflow-hidden flex flex-col justify-end" style={{ height: `${Math.max(height, 5)}%` }}>
                   {item.count > 0 && (
                     <>
                       <div style={{ height: `${(item.high / item.count) * 100}%` }} className="bg-red-500/80 w-full transition-all duration-500"></div>
@@ -336,12 +347,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
             </div>
           )
         })}
-        {/* Y-Axis Lines simulation */}
         <div className="absolute inset-0 pointer-events-none flex flex-col justify-between text-[10px] text-gray-600 px-1 pb-6 pt-6 -z-10 h-48">
-           <div className="w-full border-t border-dashed border-gray-700/50"></div>
-           <div className="w-full border-t border-dashed border-gray-700/50"></div>
-           <div className="w-full border-t border-dashed border-gray-700/50"></div>
-           <div className="w-full border-t border-dashed border-gray-700/50"></div>
+           <div className="w-full border-t border-dashed border-gray-300 dark:border-gray-700/50"></div>
+           <div className="w-full border-t border-dashed border-gray-300 dark:border-gray-700/50"></div>
+           <div className="w-full border-t border-dashed border-gray-300 dark:border-gray-700/50"></div>
+           <div className="w-full border-t border-dashed border-gray-300 dark:border-gray-700/50"></div>
         </div>
       </div>
     );
@@ -369,10 +379,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
           <div className="space-y-2">
             {['All Types', 'Image', 'Audio', 'Text', 'Document'].map(opt => (
               <div key={opt} onClick={() => setFilterType(opt)} className="flex items-center gap-3 cursor-pointer group">
-                <div className={`w-4 h-4 rounded-full border flex items-center justify-center transition-colors ${filterType === opt ? 'border-blue-500' : 'border-gray-600 group-hover:border-gray-500'}`}>
+                <div className={`w-4 h-4 rounded-full border flex items-center justify-center transition-colors ${filterType === opt ? 'border-blue-500' : 'border-gray-300 dark:border-gray-600 group-hover:border-gray-400 dark:group-hover:border-gray-500'}`}>
                   {filterType === opt && <div className="w-2 h-2 rounded-full bg-blue-500" />}
                 </div>
-                <span className={`text-sm ${filterType === opt ? 'text-white' : 'text-gray-400 group-hover:text-gray-300'}`}>{opt}</span>
+                <span className={`text-sm ${filterType === opt ? 'text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300'}`}>{opt}</span>
               </div>
             ))}
           </div>
@@ -383,10 +393,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
           <div className="space-y-2">
             {['All', 'Low', 'Medium', 'High'].map(opt => (
                <div key={opt} onClick={() => setFilterConcern(opt)} className="flex items-center gap-3 cursor-pointer group">
-                <div className={`w-4 h-4 rounded-full border flex items-center justify-center transition-colors ${filterConcern === opt ? 'border-blue-500' : 'border-gray-600 group-hover:border-gray-500'}`}>
+                <div className={`w-4 h-4 rounded-full border flex items-center justify-center transition-colors ${filterConcern === opt ? 'border-blue-500' : 'border-gray-300 dark:border-gray-600 group-hover:border-gray-400 dark:group-hover:border-gray-500'}`}>
                   {filterConcern === opt && <div className="w-2 h-2 rounded-full bg-blue-500" />}
                 </div>
-                <span className={`text-sm ${filterConcern === opt ? 'text-white' : 'text-gray-400 group-hover:text-gray-300'}`}>{opt}</span>
+                <span className={`text-sm ${filterConcern === opt ? 'text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300'}`}>{opt}</span>
               </div>
             ))}
           </div>
@@ -460,19 +470,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
                <div className="flex justify-between items-end">
                   <div className="text-center">
                     <span className="block text-xs text-gray-400">Image</span>
-                    <span className="text-lg font-bold text-white">{stats.types.Image}</span>
+                    <span className="text-lg font-bold text-gray-900 dark:text-white">{stats.types.Image}</span>
                   </div>
                   <div className="text-center">
                     <span className="block text-xs text-gray-400">Audio</span>
-                    <span className="text-lg font-bold text-white">{stats.types.Audio}</span>
+                    <span className="text-lg font-bold text-gray-900 dark:text-white">{stats.types.Audio}</span>
                   </div>
                   <div className="text-center">
                     <span className="block text-xs text-gray-400">Text</span>
-                    <span className="text-lg font-bold text-white">{stats.types.Text}</span>
+                    <span className="text-lg font-bold text-gray-900 dark:text-white">{stats.types.Text}</span>
                   </div>
                   <div className="text-center">
                     <span className="block text-xs text-gray-400">Doc</span>
-                    <span className="text-lg font-bold text-white">{stats.types.Doc}</span>
+                    <span className="text-lg font-bold text-gray-900 dark:text-white">{stats.types.Doc}</span>
                   </div>
                </div>
             </div>
@@ -503,17 +513,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
              {/* Left: Donut Chart */}
              <div className="bg-white dark:bg-[#161b22] p-6 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm lg:col-span-1">
-                <h3 className="text-lg font-bold text-white mb-6">Analysis Distribution by Type</h3>
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-6">Analysis Distribution by Type</h3>
                 <DonutChart />
              </div>
              
              {/* Right: Bar/Line Chart */}
              <div className="bg-white dark:bg-[#161b22] p-6 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm lg:col-span-2 relative">
-                <h3 className="text-lg font-bold text-white mb-2">Analysis Timeline & Concern Levels</h3>
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Analysis Timeline & Concern Levels</h3>
                 <div className="flex items-center gap-4 mb-4">
-                   <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-green-500"></div><span className="text-xs text-gray-400">Low</span></div>
-                   <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-orange-500"></div><span className="text-xs text-gray-400">Medium</span></div>
-                   <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-red-500"></div><span className="text-xs text-gray-400">High</span></div>
+                   <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-green-500"></div><span className="text-xs text-gray-500 dark:text-gray-400">Low</span></div>
+                   <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-orange-500"></div><span className="text-xs text-gray-500 dark:text-gray-400">Medium</span></div>
+                   <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-red-500"></div><span className="text-xs text-gray-500 dark:text-gray-400">High</span></div>
                 </div>
                 <BarChart />
              </div>
@@ -559,7 +569,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
                       <td className="p-4 pr-6 text-right">
                          <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button 
-                              onClick={(e) => { e.stopPropagation(); onViewDetails?.(row); }}
+                              onClick={(e) => { e.stopPropagation(); handleOpenReport(row); }}
                               className="text-xs bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 px-3 py-1.5 rounded-lg transition-colors font-medium"
                             >
                               View
@@ -604,19 +614,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
       {/* --- MODAL --- */}
       {selectedReport && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-           <div className="bg-[#161b22] border border-gray-700 w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+           <div className="bg-white dark:bg-[#161b22] border border-gray-200 dark:border-gray-700 w-full max-w-3xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] transition-colors">
               {/* Header */}
-              <div className="p-6 border-b border-gray-700 flex justify-between items-center bg-[#0d1117]">
-                 <h3 className="text-lg font-bold text-white">
-                   {deleteConfirmation ? 'Delete Analysis?' : isEditMode ? 'Edit Details' : 'Analysis Details'}
-                 </h3>
-                 <button onClick={handleCloseModal} className="text-gray-400 hover:text-white"><svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
+              <div className="p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-[#0d1117]">
+                 <div>
+                   <h3 className="text-lg font-bold text-gray-900 dark:text-white">
+                     {deleteConfirmation ? 'Delete Analysis?' : isEditMode ? 'Edit Details' : 'Analysis Report'}
+                   </h3>
+                   {!deleteConfirmation && !isEditMode && (
+                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Generated on {new Date(selectedReport.created_at).toLocaleDateString()}</p>
+                   )}
+                 </div>
+                 <button onClick={handleCloseModal} className="text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors">
+                   <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                 </button>
               </div>
+              
               {/* Body */}
               <div className="p-6 overflow-y-auto">
                  {deleteConfirmation ? (
                     <div className="text-center sm:text-left">
-                       <p className="text-gray-300 mb-6">Are you sure you want to delete this report? This action cannot be undone.</p>
+                       <p className="text-gray-600 dark:text-gray-300 mb-6">Are you sure you want to delete this report? This action cannot be undone.</p>
                        <div className="flex justify-end gap-3">
                           <Button variant="secondary" onClick={() => setDeleteConfirmation(false)}>Cancel</Button>
                           <Button variant="danger" onClick={handleDelete} disabled={isDeleting}>{isDeleting ? 'Deleting...' : 'Delete Permanently'}</Button>
@@ -624,22 +642,87 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
                     </div>
                  ) : isEditMode ? (
                     <div className="space-y-4">
-                       <div><label className="block text-xs font-medium text-gray-400 mb-1">Custom Title</label><input type="text" value={editTitle} onChange={e => setEditTitle(e.target.value)} className="w-full bg-[#0d1117] border border-gray-700 rounded-lg p-3 text-white focus:border-blue-500 focus:outline-none" /></div>
-                       <div><label className="block text-xs font-medium text-gray-400 mb-1">Notes</label><textarea rows={3} value={editNotes} onChange={e => setEditNotes(e.target.value)} className="w-full bg-[#0d1117] border border-gray-700 rounded-lg p-3 text-white focus:border-blue-500 focus:outline-none" /></div>
-                       <div><label className="block text-xs font-medium text-gray-400 mb-1">Concern Override</label><select value={editConcern} onChange={e => setEditConcern(e.target.value as HealthRiskLevel)} className="w-full bg-[#0d1117] border border-gray-700 rounded-lg p-3 text-white focus:border-blue-500 focus:outline-none"><option value="Low">Low</option><option value="Medium">Medium</option><option value="High">High</option></select></div>
+                       <div><label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Custom Title</label><input type="text" value={editTitle} onChange={e => setEditTitle(e.target.value)} className="w-full bg-white dark:bg-[#0d1117] border border-gray-300 dark:border-gray-700 rounded-lg p-3 text-gray-900 dark:text-white focus:border-blue-500 focus:outline-none" /></div>
+                       <div><label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Notes</label><textarea rows={3} value={editNotes} onChange={e => setEditNotes(e.target.value)} className="w-full bg-white dark:bg-[#0d1117] border border-gray-300 dark:border-gray-700 rounded-lg p-3 text-gray-900 dark:text-white focus:border-blue-500 focus:outline-none" /></div>
+                       <div><label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Concern Override</label><select value={editConcern} onChange={e => setEditConcern(e.target.value as HealthRiskLevel)} className="w-full bg-white dark:bg-[#0d1117] border border-gray-300 dark:border-gray-700 rounded-lg p-3 text-gray-900 dark:text-white focus:border-blue-500 focus:outline-none"><option value="Low">Low</option><option value="Medium">Medium</option><option value="High">High</option></select></div>
                        <div className="pt-4 flex justify-end gap-3"><Button variant="secondary" onClick={() => setIsEditMode(false)}>Cancel</Button><Button onClick={handleSaveChanges} disabled={isSaving}>{isSaving ? 'Saving...' : 'Save Changes'}</Button></div>
                     </div>
                  ) : (
-                    <div className="space-y-6">
-                       <div className="flex justify-between items-start">
-                          <div><h2 className="text-xl font-bold text-white mb-1">{selectedReport.custom_title || selectedReport.input_summary || "Untitled"}</h2><p className="text-sm text-gray-500">{new Date(selectedReport.created_at).toLocaleString()}</p></div>
-                          <div className="text-right"><div className="mb-1">{getConcernBadge(selectedReport.concern_override || selectedReport.preliminary_concern || 'Medium')}</div><span className="text-xs text-gray-500 capitalize bg-gray-800 px-2 py-0.5 rounded">{selectedReport.input_type}</span></div>
+                    <div className="space-y-8">
+                       {/* Top Metadata */}
+                       <div className="flex flex-wrap gap-4 items-center justify-between pb-4 border-b border-gray-100 dark:border-gray-800">
+                          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">{selectedReport.custom_title || selectedReport.input_summary || "Untitled Analysis"}</h2>
+                          <div className="flex items-center gap-3">
+                             {getConcernBadge(selectedReport.concern_override || selectedReport.preliminary_concern || 'Medium')}
+                             <span className="text-xs text-gray-500 dark:text-gray-400 uppercase font-bold tracking-wide bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">{selectedReport.input_type}</span>
+                          </div>
                        </div>
-                       {selectedReport.user_notes && <div className="bg-yellow-900/20 border border-yellow-800/50 p-4 rounded-lg"><span className="text-xs font-bold text-yellow-500 uppercase block mb-1">Notes</span><p className="text-sm text-gray-300">{selectedReport.user_notes}</p></div>}
-                       <div><h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">AI Summary</h4><p className="text-gray-300 text-sm leading-relaxed">{selectedReport.ai_summary}</p></div>
-                       <div className="pt-4 border-t border-gray-700 flex gap-3">
-                         <Button className="w-full" onClick={() => onViewDetails?.(selectedReport)}>Open Full Chat</Button>
-                         {!isOfflineMode && <Button variant="secondary" onClick={() => setIsEditMode(true)}>Edit</Button>}
+
+                       {/* User Notes */}
+                       {selectedReport.user_notes && (
+                         <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800/50 p-4 rounded-lg">
+                           <span className="text-xs font-bold text-yellow-600 dark:text-yellow-500 uppercase block mb-1">Your Notes</span>
+                           <p className="text-sm text-yellow-800 dark:text-gray-300">{selectedReport.user_notes}</p>
+                         </div>
+                       )}
+
+                       {/* AI Analysis Sections */}
+                       <div className="space-y-6">
+                          <div>
+                             <h4 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wider mb-2 flex items-center gap-2">
+                               <span className="w-1 h-4 bg-blue-500 rounded-full"></span>
+                               Executive Summary
+                             </h4>
+                             <p className="text-gray-700 dark:text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">{selectedReport.ai_summary || "No summary available."}</p>
+                          </div>
+
+                          {selectedReport.ai_recommendations && (
+                            <div>
+                               <h4 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wider mb-2 flex items-center gap-2">
+                                 <span className="w-1 h-4 bg-green-500 rounded-full"></span>
+                                 Recommendations
+                               </h4>
+                               <div className="text-gray-700 dark:text-gray-300 text-sm leading-relaxed whitespace-pre-wrap p-4 bg-green-50 dark:bg-green-900/10 rounded-xl border border-green-100 dark:border-green-900/30">
+                                 {selectedReport.ai_recommendations}
+                               </div>
+                            </div>
+                          )}
+
+                          {selectedReport.ai_details && (
+                            <div>
+                               <h4 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wider mb-2 flex items-center gap-2">
+                                 <span className="w-1 h-4 bg-purple-500 rounded-full"></span>
+                                 Detailed Analysis
+                               </h4>
+                               <div className="text-gray-700 dark:text-gray-300 text-sm leading-relaxed whitespace-pre-wrap pl-2 border-l-2 border-gray-200 dark:border-gray-700">
+                                 {selectedReport.ai_details}
+                               </div>
+                            </div>
+                          )}
+                          
+                          {/* Original Input Collapsed View */}
+                          <div className="pt-4">
+                             <details className="group">
+                                <summary className="flex items-center gap-2 text-xs font-semibold text-gray-500 cursor-pointer hover:text-gray-700 dark:hover:text-gray-300 select-none">
+                                   <svg className="w-4 h-4 transition-transform group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                                   Show Original Input
+                                </summary>
+                                <div className="mt-2 p-3 bg-gray-50 dark:bg-slate-900 rounded border border-gray-200 dark:border-gray-700 text-xs text-gray-600 dark:text-gray-400 font-mono whitespace-pre-wrap">
+                                   {selectedReport.input_text || selectedReport.input_summary}
+                                </div>
+                             </details>
+                          </div>
+                       </div>
+
+                       {/* Action Footer */}
+                       <div className="pt-6 border-t border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row gap-3">
+                         <Button className="w-full sm:flex-1" onClick={() => onViewDetails?.(selectedReport)}>Open Full Chat View</Button>
+                         {!isOfflineMode && (
+                           <div className="flex gap-3 w-full sm:w-auto">
+                             <Button variant="secondary" className="flex-1 sm:flex-none" onClick={() => setIsEditMode(true)}>Edit Details</Button>
+                             <Button variant="danger" className="flex-1 sm:flex-none" onClick={() => setDeleteConfirmation(true)}>Delete</Button>
+                           </div>
+                         )}
                        </div>
                     </div>
                  )}

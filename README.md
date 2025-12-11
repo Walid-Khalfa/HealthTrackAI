@@ -1,103 +1,80 @@
-# HealthTrackAI 🏥
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
-![Status](https://img.shields.io/badge/status-beta-orange.svg)
-![License](https://img.shields.io/badge/license-MIT-green.svg)
-![Tech](https://img.shields.io/badge/tech-React%20%7C%20TypeScript%20%7C%20Supabase%20%7C%20Gemini-lightgrey)
+# HealthTrackAI hc
 
-**HealthTrackAI** is a secure, educational, **multimodal medical assistant** built on the **Google Gemini 3 Pro** architecture. It empowers users to analyze symptoms through various inputs—text descriptions, audio recordings, medical images, and PDF documents—to receive preliminary, non-diagnostic insights.
+![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)
+![Security](https://img.shields.io/badge/security-hardened-green.svg)
+![License](https://img.shields.io/badge/license-MIT-lightgrey.svg)
+![Tech](https://img.shields.io/badge/stack-React%20%7C%20Supabase%20%7C%20Gemini%203%20Pro-purple)
+
+**HealthTrackAI** is a secure, educational, **multimodal medical assistant** built on the **Google Gemini 3 Pro** architecture. It empowers users to analyze symptoms via text, audio recordings, medical images, and PDF documents to receive preliminary, non-diagnostic insights.
 
 > **⚠️ DISCLAIMER:** This application is for **educational purposes only**. It does not provide medical diagnosis, treatment, or prescriptions. In case of emergency, users are strictly advised to contact professional emergency services.
 
 ---
 
-## 📖 Table of Contents
+## 🛡️ Security Architecture (OWASP Compliant)
 
-- [Key Features](#-key-features)
-- [Tech Stack](#-tech-stack)
-- [Prerequisites](#-prerequisites)
-- [Installation & Setup](#-installation--setup)
-- [Usage Guide](#-usage-guide)
-- [Database Schema](#-database-schema-supabase)
-- [Security & Privacy](#-security--privacy)
-- [Project Structure](#-project-structure)
-- [Troubleshooting](#-troubleshooting)
-- [Contributing](#-contributing)
-- [License](#-license)
+HealthTrackAI is built with a **Security-First** approach, implementing specific defenses against top web vulnerabilities:
+
+| Vulnerability Category | Mitigation Strategy Implemented |
+| :--- | :--- |
+| **A01: Broken Access Control** | Strict **Row Level Security (RLS)** policies in Supabase ensure users can *only* access their own data. Service functions derive User ID strictly from the authenticated session. |
+| **A03: Injection** | **XML Tagging** isolates user input from system instructions to prevent LLM Prompt Injection. All inputs are sanitized. |
+| **A04: Insecure Design** | Implementation of **Rate Limiting** (client-side) and **File Constraints** (size & count limits) to prevent Denial of Service (DoS). |
+| **A08: Software & Data Integrity** | **Safe JSON Parsing** with schema validation prevents crashes from malformed AI responses. **Magic Byte analysis** verifies file uploads (prevents renaming `.exe` to `.jpg`). |
+| **A09: Logging & Monitoring** | Centralized **Security Logger** records critical events (Auth failures, Attack attempts, File violations) to a secure audit table. |
+| **A10: Server-Side Request Forgery** | **URL Stripping** removes potential malicious links from user input before sending to the AI. Strict file type allow-listing prevents XML/SVG injection. |
 
 ---
 
 ## 🚀 Key Features
 
-*   **🧠 Multimodal Analysis:**
-    *   **Text:** Detailed symptom description processing.
-    *   **Audio:** Voice-to-text symptom transcription and analysis.
-    *   **Vision:** Image analysis for dermatological issues or visible symptoms.
-    *   **Documents:** Parsing and explanation of PDF medical reports/lab results.
-*   **🤖 Advanced AI Integration:**
-    *   **Gemini 3 Pro:** Handles complex reasoning and synthesis for health insights.
-    *   **Gemini 2.5 Flash:** Ensures rapid request classification and structured data extraction.
-*   **🔒 Secure Dashboard:**
-    *   User authentication via Supabase Auth.
-    *   Encrypted storage for sensitive health history.
-    *   Role-based access control (Free vs. Pro users).
-*   **📊 Analytics & Tracking:**
-    *   Visual dashboard for tracking symptom frequency and concern levels over time.
-    *   Filtering by modality (Audio, Image, Doc) and risk level.
-*   **📄 PDF Report Generation:**
-    *   One-click export of AI analysis into a professional "Doctor Summary" PDF.
+### 🧠 Multimodal Analysis
+*   **Text:** Symptom description processing.
+*   **Audio:** Voice-to-text symptom transcription and analysis (using native browser APIs).
+*   **Vision:** Analysis of dermatological issues or visible symptoms via images.
+*   **Documents:** Parsing and explanation of PDF medical reports/lab results.
+
+### 🤖 Advanced AI Integration
+*   **Reasoning Engine:** Uses **Gemini 3 Pro Preview** for complex medical reasoning and cross-modal synthesis.
+*   **Classification Engine:** Uses **Gemini 2.5 Flash** for rapid request classification and structured JSON data extraction.
+
+### 🔒 Secure Dashboard
+*   **Session Management:** Automatic logout after 15 minutes of inactivity.
+*   **Encrypted Storage:** All health data is stored in Supabase with RLS.
+*   **Role-Based Access:** Distinction between Free and Pro users.
+
+### 📄 Professional Reporting
+*   **PDF Export:** Generate a clean, professional "Doctor Summary" PDF to share with healthcare providers.
+*   **Visual Analytics:** Track symptom frequency and concern levels over time via interactive charts.
 
 ---
 
 ## 🛠️ Tech Stack
 
-### Frontend
-*   **Framework:** React 19
-*   **Language:** TypeScript
-*   **Styling:** Tailwind CSS (Dark Mode supported)
-*   **Build Tool:** Vite
-
-### Backend & Database
-*   **BaaS:** Supabase
-*   **Database:** PostgreSQL
-*   **Auth:** Supabase Auth
-*   **Storage:** Supabase Storage (for images/audio/PDFs)
-
-### AI & ML
-*   **SDK:** Google GenAI SDK (`@google/genai`)
-*   **Models:**
-    *   `gemini-3-pro-preview` (Reasoning)
-    *   `gemini-2.5-flash` (Classification & JSON extraction)
-
----
-
-## 📋 Prerequisites
-
-Before you begin, ensure you have the following installed:
-*   [Node.js](https://nodejs.org/) (v18 or higher)
-*   [npm](https://www.npmjs.com/) or [yarn](https://yarnpkg.com/)
-*   A [Google Cloud Project](https://console.cloud.google.com/) with the **Gemini API** enabled.
-*   A [Supabase](https://supabase.com/) project.
+*   **Frontend:** React 19, TypeScript, Vite, Tailwind CSS (Dark Mode supported).
+*   **Backend (BaaS):** Supabase (Auth, PostgreSQL DB, Storage, Edge Functions).
+*   **AI SDK:** Google GenAI SDK (`@google/genai`).
+*   **PDF Generation:** `html2pdf.js`.
 
 ---
 
 ## ⚙️ Installation & Setup
 
-Follow these steps to get the project running locally.
+### 1. Prerequisites
+*   Node.js (v18+)
+*   A Google Cloud Project with **Gemini API** enabled.
+*   A **Supabase** project.
 
-### 1. Clone the Repository
+### 2. Installation
 ```bash
 git clone https://github.com/your-username/healthtrackai.git
 cd healthtrackai
-```
-
-### 2. Install Dependencies
-```bash
 npm install
 ```
 
-### 3. Environment Configuration
-Create a `.env` file in the root directory and add your API keys. You can duplicate a `.env.example` if available, or use the template below:
+### 3. Configuration
+Create a `.env` file in the root directory:
 
 ```env
 # Google Gemini API
@@ -108,184 +85,108 @@ VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
 ```
 
-### 4. Database Setup
-Set up the required tables and storage in your Supabase project. See the [Database Schema](#-database-schema-supabase) section for the SQL scripts.
-
-### 5. Run Development Server
+### 4. Run Locally
 ```bash
 npm run dev
 ```
-The application will start at `http://localhost:5173`.
 
 ---
 
-## 💡 Usage Guide
+## 🗄️ Database Schema & Security Setup
 
-### Getting Started
-1.  **Sign Up/Login**: Create an account using the authentication page.
-2.  **Dashboard**: Once logged in, you'll see your dashboard with past reports and analytics.
+To run this application, execute the following SQL in your Supabase SQL Editor. This sets up the tables and the **mandatory security policies**.
 
-### Creating a New Analysis
-1.  Click **"New Analysis"** or **"Start Analysis"**.
-2.  **Describe Symptoms**: Type your symptoms in the text box.
-3.  **Upload Media** (Optional):
-    *   **Audio**: Record or upload a voice note describing how you feel.
-    *   **Image**: Upload photos of visible symptoms (e.g., rashes).
-    *   **Document**: Upload PDF lab reports for analysis.
-4.  **Submit**: Click the send button. The AI will analyze the inputs and provide a summary, details, and recommendations.
-
-### Managing Reports
-*   **View History**: Click on any past report in the dashboard to view the full details.
-*   **Export PDF**: Use the export button to download a summary to share with your healthcare provider.
-
----
-
-## 🗄️ Database Schema (Supabase)
-
-To run this application, you must set up the following tables in your Supabase SQL Editor:
-
-### 1. Profiles Table
-Extends the default `auth.users` table.
-
+### 1. Profiles & Reports
 ```sql
+-- PROFILES
 create table public.profiles (
   id uuid references auth.users not null primary key,
   email text,
   full_name text,
-  role text default 'user_free', -- 'user_free', 'user_pro', 'admin'
-  avatar_url text,
+  role text default 'user_free', 
   updated_at timestamp with time zone
 );
-
--- Enable RLS
 alter table public.profiles enable row level security;
-```
+create policy "Users view own profile" on profiles for select using (auth.uid() = id);
+create policy "Users update own profile" on profiles for update using (auth.uid() = id);
 
-### 2. Health Reports Table
-Stores the metadata and AI analysis results.
-
-```sql
+-- HEALTH REPORTS
 create table public.health_reports (
   id uuid default gen_random_uuid() primary key,
   user_id uuid references auth.users not null,
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
-  
-  -- Inputs
+  created_at timestamp with time zone default now(),
   input_text text,
   input_summary text,
-  input_type text, -- 'text', 'image', 'audio', 'document'
-  
-  -- Flags
-  has_images boolean default false,
-  has_audio boolean default false,
-  has_documents boolean default false,
-  flagged boolean default false,
-  
-  -- AI Outputs
+  input_type text,
   ai_summary text,
   ai_details text,
   ai_recommendations text,
-  preliminary_concern text, -- 'Low', 'Medium', 'High'
-  
-  -- User Edits
+  preliminary_concern text,
   custom_title text,
   user_notes text,
   concern_override text,
-  
   status text default 'pending',
   meta jsonb
 );
-
--- Enable RLS
 alter table public.health_reports enable row level security;
+create policy "Users manage own reports" on health_reports for all using (auth.uid() = user_id);
 ```
 
-### 3. Health Files Table
-Links uploaded files to specific reports.
-
+### 2. Files & Storage
 ```sql
+-- HEALTH FILES METADATA
 create table public.health_files (
   id uuid default gen_random_uuid() primary key,
   report_id uuid references public.health_reports on delete cascade,
   user_id uuid references auth.users not null,
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
-  
-  file_type text, -- 'image', 'audio', 'document'
+  created_at timestamp with time zone default now(),
+  file_type text,
   storage_path text not null,
   original_name text,
   mime_type text,
   size_bytes bigint
 );
-
--- Enable RLS
 alter table public.health_files enable row level security;
+create policy "Users manage own files" on health_files for all using (auth.uid() = user_id);
+```
+
+### 3. Security Audit Logs (Critical)
+```sql
+-- AUDIT LOGS (For OWASP A09)
+create table public.security_audit_logs (
+  id uuid default gen_random_uuid() primary key,
+  created_at timestamp with time zone default now(),
+  event_type text, -- 'AUTH_FAILURE', 'FILE_VIOLATION', etc.
+  severity text,   -- 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'
+  user_id uuid,
+  user_email text,
+  details jsonb
+);
+alter table public.security_audit_logs enable row level security;
+
+-- Only allows inserts from authenticated users or service role
+create policy "Enable insert for authenticated users" on security_audit_logs for insert with check (auth.role() = 'authenticated');
+-- Users generally should NOT see logs, only admins.
+create policy "Admins view logs" on security_audit_logs for select using (
+  exists (select 1 from profiles where id = auth.uid() and role in ('admin', 'super_admin'))
+);
 ```
 
 ### 4. Storage Buckets
-Create a new public bucket named `health_files` in Supabase Storage.
-
----
-
-## 🛡️ Security & Privacy
-
-*   **Prompt Injection Protection:** User inputs are sanitized and wrapped in XML tags (`<user_input>`) before processing.
-*   **Session Management:** Automatic logout after **15 minutes of inactivity** to protect sensitive data.
-*   **File Validation:** Uploads are validated via Magic Bytes signatures to ensure file integrity.
-*   **Row Level Security (RLS):** Database policies strictly enforce that users can only access their own records.
-
----
-
-## 📂 Project Structure
-
-```
-/
-├── components/          # React UI Components (Dashboard, Chat, Forms)
-├── context/             # Auth Context & Global State
-├── services/            # API integrations (Gemini, Supabase wrappers)
-├── utils/               # Helper functions (Parsers, Formatters)
-├── App.tsx              # Main Routing & Layout Logic
-├── Layout.tsx           # App Shell & Navigation
-├── constants.ts         # Global Constants
-├── types.ts             # TypeScript interfaces
-├── index.tsx            # Entry point
-└── index.html           # HTML Template
-```
-
----
-
-## ❓ Troubleshooting
-
-### Common Issues
-
-*   **Authentication Failed:**
-    *   Ensure your `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are correct in the `.env` file.
-    *   Check if Email Auth provider is enabled in your Supabase dashboard.
-
-*   **AI Analysis Not Working:**
-    *   Verify your `API_KEY` for Gemini is valid and has quota available.
-    *   Check the browser console for specific error messages regarding the API call.
-
-*   **Database Errors:**
-    *   Ensure you have run the SQL scripts in the [Database Schema](#-database-schema-supabase) section.
-    *   Verify RLS policies if you are unable to view your own data.
+In Supabase Storage, create a bucket named `health_files` and add RLS policies to restrict access to `(bucket_id = 'health_files' AND auth.uid()::text = (storage.foldername(name))[2])`.
 
 ---
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please follow these steps to contribute:
-
-1.  **Fork the repository**.
-2.  Create your feature branch: `git checkout -b feature/AmazingFeature`.
-3.  Commit your changes: `git commit -m 'Add some AmazingFeature'`.
-4.  Push to the branch: `git push origin feature/AmazingFeature`.
-5.  Open a **Pull Request**.
+1.  Fork the repository.
+2.  Create your feature branch (`git checkout -b feature/AmazingFeature`).
+3.  Commit your changes (`git commit -m 'Add some AmazingFeature'`).
+4.  Push to the branch (`git push origin feature/AmazingFeature`).
+5.  Open a Pull Request.
 
 ---
 
 ## 📄 License
 
-Distributed under the MIT License. See `LICENSE` for more information.
-
----
-*Built with ❤️ using Google AI Studio*
+Distributed under the MIT License.
