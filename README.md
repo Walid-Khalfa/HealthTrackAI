@@ -12,6 +12,22 @@
 
 ---
 
+## 🔗 Quick Access
+
+### 🚀 [Launch Live Application](https://ai.studio/apps/drive/1l7b1dG4a-hxZfNuoW64kyabcRonFnwUB)
+
+---
+
+## 🎥 Demo Video
+
+Click below to watch the full walkthrough of HealthTrackAI:
+
+[![HealthTrackAI Demo](https://img.youtube.com/vi/qJBWB4I5ECM/0.jpg)](https://youtu.be/qJBWB4I5ECM)
+
+[Watch on YouTube](https://youtu.be/qJBWB4I5ECM)
+
+---
+
 ## 🛡️ Security Architecture (OWASP Compliant)
 
 HealthTrackAI is built with a **Security-First** approach, implementing specific defenses against top web vulnerabilities:
