@@ -59,7 +59,7 @@ HealthTrackAI implements rigorous security controls to protect user data and pre
 Clone the repository and install dependencies:
 
 ```bash
-git clone https://github.com/your-org/healthtrackai.git
+git clone https://github.com/Walid-Khalfa/healthtrackai.git
 cd healthtrackai
 npm install
 ```
