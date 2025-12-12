@@ -1,5 +1,4 @@
 
-
 export enum MessageRole {
   User = 'user',
   Model = 'model',
@@ -10,6 +9,10 @@ export enum AttachmentType {
   Audio = 'audio',
   Pdf = 'pdf',
 }
+
+export type MessageStatus = 'sending' | 'sent' | 'error';
+
+export type FeedbackRating = 'positive' | 'negative';
 
 export interface Attachment {
   id: string;
@@ -27,6 +30,9 @@ export interface Message {
   content: string;
   attachments?: Attachment[];
   timestamp: number;
+  status?: MessageStatus;
+  reportId?: string; // Link to the specific report ID
+  feedback?: FeedbackRating; // Local state for feedback
 }
 
 export interface AppState {
@@ -36,11 +42,20 @@ export interface AppState {
   attachments: Attachment[];
 }
 
+export interface Task {
+  id: string;
+  text: string;
+  description?: string;
+  completed: boolean;
+  dueDate?: string;
+  priority?: 'low' | 'medium' | 'high';
+  createdAt: number;
+}
+
 // Supabase Schema Types
 
 export type AppRole = 'user_free' | 'user_pro' | 'moderator' | 'admin' | 'super_admin';
 
-// MODIFIED: Removed 'Unknown' to enforce strict categorization
 export type HealthRiskLevel = 'Low' | 'Medium' | 'High';
 export type ReportStatus = 'pending' | 'completed' | 'failed';
 
@@ -67,6 +82,7 @@ export interface HealthReport {
   custom_title?: string;
   user_notes?: string;
   concern_override?: HealthRiskLevel;
+  due_date?: string; // New field for task due dates / follow ups
 
   // Flags
   has_images: boolean;
@@ -79,7 +95,7 @@ export interface HealthReport {
   ai_details?: string;
   ai_recommendations?: string;
   
-  // NEW: Matches DB schema
+  // Matches DB schema
   preliminary_concern: HealthRiskLevel; 
   
   // State

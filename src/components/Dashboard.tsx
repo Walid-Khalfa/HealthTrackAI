@@ -1,54 +1,72 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { HealthReport, HealthRiskLevel } from '../types';
-import { getHealthReports, getAllHealthReports, updateReportDetails, deleteHealthReport } from '../services/supabaseClient';
+import { updateReportDetails, deleteHealthReport } from '../services/supabaseClient';
 import { Button } from './Button';
 import { useAuth } from '../context/AuthContext';
 import { RoleGuard } from './RoleGuard';
-import { safeJsonParse, validateHealthReportList } from '../utils/security';
+import { HealthReportView } from './HealthReportView';
+import { Icons } from './Icons';
+import { useHealthData } from '../hooks/useHealthData';
+import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 interface DashboardProps {
   onViewDetails?: (report: HealthReport) => void;
   onNewAnalysis?: () => void;
 }
 
-// Notification Banner Component
+// Notification Banner
 const NotificationBanner = ({ type, message, onClose }: { type: 'success' | 'error', message: string, onClose: () => void }) => (
   <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-[60] px-6 py-3 rounded-xl shadow-lg border flex items-center gap-3 animate-fade-in-down ${
     type === 'success' 
       ? 'bg-green-50 text-green-800 border-green-200 dark:bg-green-900/80 dark:text-green-100 dark:border-green-800' 
       : 'bg-red-50 text-red-800 border-red-200 dark:bg-red-900/80 dark:text-red-100 dark:border-red-800'
   }`}>
-    {type === 'success' ? (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-    ) : (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-    )}
+    {type === 'success' ? <Icons.Check className="w-5 h-5" /> : <Icons.Close className="w-5 h-5" />}
     <span className="font-medium text-sm">{message}</span>
-    <button onClick={onClose} className="ml-2 hover:opacity-70"><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
+    <button onClick={onClose} className="ml-2 hover:opacity-70"><Icons.Close className="w-4 h-4" /></button>
   </div>
 );
 
+// Custom Tooltip
+const CustomTooltip = ({ active, payload, label }: any) => {
+  if (active && payload && payload.length) {
+    const title = label || (payload[0] && payload[0].name);
+    return (
+      <div className="bg-white dark:bg-slate-800 p-3 px-4 border border-gray-100 dark:border-slate-700 rounded-xl shadow-xl text-xs z-50 min-w-[150px]">
+        <p className="font-bold text-gray-800 dark:text-gray-100 mb-2 border-b border-gray-100 dark:border-gray-700 pb-1">{title}</p>
+        <div className="space-y-1">
+          {payload.map((entry: any, index: number) => (
+            <div key={index} className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <div className="w-2.5 h-2.5 rounded-full shadow-sm" style={{ backgroundColor: entry.color || entry.payload.fill }} />
+                <span className="text-gray-500 dark:text-gray-400 capitalize font-medium">{entry.name}:</span>
+              </div>
+              <span className="font-bold text-gray-900 dark:text-white">{entry.value}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  return null;
+};
+
 export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalysis }) => {
-  const { user, profile, isAdmin } = useAuth();
-  const [reports, setReports] = useState<HealthReport[]>([]);
-  const [loading, setLoading] = useState(true);
-  
-  // Offline Mode State
-  const [isOfflineMode, setIsOfflineMode] = useState(false);
-  
-  // Admin State
+  const { user, isAdmin } = useAuth();
   const [isAdminMode, setIsAdminMode] = useState(false);
+  
+  // Use Custom Hook for Logic
+  const { reports, setReports, loading, isOfflineMode, stats } = useHealthData(user, isAdmin, isAdminMode);
 
-  // Notification State
+  // Local State
   const [notification, setNotification] = useState<{ type: 'success' | 'error', message: string } | null>(null);
-
-  // Filters
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState('All Types');
   const [filterConcern, setFilterConcern] = useState('All');
-
-  // Pagination
+  const [recentSearches, setRecentSearches] = useState<string[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const searchContainerRef = useRef<HTMLDivElement>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 8;
 
@@ -57,130 +75,38 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
   const [isEditMode, setIsEditMode] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = useState(false);
-
-  // Edit Form State
   const [editTitle, setEditTitle] = useState('');
   const [editNotes, setEditNotes] = useState('');
   const [editConcern, setEditConcern] = useState<HealthRiskLevel>('Medium');
+  const [editDueDate, setEditDueDate] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
-  // Helper to show notifications
   const showNotification = (type: 'success' | 'error', message: string) => {
     setNotification({ type, message });
     setTimeout(() => setNotification(null), 4000);
   };
 
-  // --- Data Fetching ---
-  const fetchHistory = async () => {
-    if (!user) return;
-    
-    const CACHE_KEY = `healthtrackai_cached_reports_${user.id}`;
-
-    try {
-      setLoading(true);
-      
-      if (!navigator.onLine) {
-        throw new Error("Device is offline");
-      }
-
-      let data: HealthReport[] = [];
-      if (isAdmin && isAdminMode) {
-        data = await getAllHealthReports();
-      } else {
-        data = await getHealthReports();
-      }
-      
-      setReports(data || []);
-      setIsOfflineMode(false);
-
-      if (!isAdminMode && data && data.length > 0) {
-        try {
-          const toCache = data.slice(0, 5);
-          localStorage.setItem(CACHE_KEY, JSON.stringify(toCache));
-        } catch (e) {
-          console.warn("Failed to cache reports", e);
-        }
-      }
-
-    } catch (err) {
-      console.warn("Failed to load history from network, attempting cache...", err);
-      
-      try {
-        const cached = localStorage.getItem(CACHE_KEY);
-        if (cached) {
-          const parsed = safeJsonParse<HealthReport[]>(cached, validateHealthReportList);
-          
-          if (parsed) {
-            setReports(parsed);
-            setIsOfflineMode(true);
-          } else {
-            localStorage.removeItem(CACHE_KEY);
-            setReports([]);
-          }
-        } else {
-          setReports([]);
-        }
-      } catch (cacheErr) {
-        console.error("Cache system error", cacheErr);
-        setReports([]);
-      }
-    } finally {
-      setLoading(false);
+  useEffect(() => {
+    const savedSearches = localStorage.getItem('ht_recent_searches');
+    if (savedSearches) {
+      try { setRecentSearches(JSON.parse(savedSearches)); } catch (e) { console.error(e); }
     }
+    const handleClickOutside = (event: MouseEvent) => {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(event.target as Node)) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const saveRecentSearch = (query: string) => {
+    if (!query.trim()) return;
+    const newSearches = [query, ...recentSearches.filter(s => s !== query)].slice(0, 5);
+    setRecentSearches(newSearches);
+    localStorage.setItem('ht_recent_searches', JSON.stringify(newSearches));
   };
 
-  useEffect(() => {
-    fetchHistory();
-    const handleOnline = () => fetchHistory();
-    window.addEventListener('online', handleOnline);
-    return () => window.removeEventListener('online', handleOnline);
-  }, [user, isAdmin, isAdminMode]);
-
-  // --- Stats Calculation (Memoized) ---
-  const stats = useMemo(() => {
-    const total = reports.length;
-    
-    const types = {
-      Image: reports.filter(r => r.input_type?.toLowerCase().includes('image')).length,
-      Audio: reports.filter(r => r.input_type?.toLowerCase().includes('audio')).length,
-      Text: reports.filter(r => r.input_type?.toLowerCase().includes('text') && !r.input_type.includes('image') && !r.input_type.includes('audio')).length,
-      Doc: reports.filter(r => r.input_type?.toLowerCase().includes('document')).length,
-    };
-
-    const risks = {
-      High: reports.filter(r => (r.concern_override || r.preliminary_concern) === 'High').length,
-      Medium: reports.filter(r => (r.concern_override || r.preliminary_concern) === 'Medium').length,
-      Low: reports.filter(r => (r.concern_override || r.preliminary_concern) === 'Low').length,
-    };
-
-    let avgConcern = 'Low';
-    if (risks.High > risks.Medium && risks.High > risks.Low) avgConcern = 'High';
-    else if (risks.Medium > risks.Low) avgConcern = 'Medium';
-
-    const last6Months = Array.from({ length: 6 }).map((_, i) => {
-      const d = new Date();
-      d.setMonth(d.getMonth() - i);
-      const monthKey = d.toLocaleString('default', { month: 'short' });
-      return { month: monthKey, count: 0, high: 0, med: 0, low: 0 };
-    }).reverse();
-
-    reports.forEach(r => {
-      const d = new Date(r.created_at);
-      const monthKey = d.toLocaleString('default', { month: 'short' });
-      const found = last6Months.find(m => m.month === monthKey);
-      if (found) {
-        found.count++;
-        const risk = r.concern_override || r.preliminary_concern || 'Medium';
-        if (risk === 'High') found.high++;
-        else if (risk === 'Medium') found.med++;
-        else found.low++;
-      }
-    });
-
-    return { total, types, risks, avgConcern, timeline: last6Months };
-  }, [reports]);
-
-  // --- Handlers ---
   const handleOpenReport = (report: HealthReport) => {
     setSelectedReport(report);
     setIsEditMode(false);
@@ -188,6 +114,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
     setEditTitle(report.custom_title || '');
     setEditNotes(report.user_notes || '');
     setEditConcern(report.concern_override || report.preliminary_concern || 'Medium');
+    setEditDueDate(report.due_date || '');
   };
 
   const handleCloseModal = () => {
@@ -198,51 +125,39 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
 
   const handleSaveChanges = async () => {
     if (!selectedReport) return;
-    
-    if (isOfflineMode) {
-      showNotification('error', "Offline: Cannot save changes.");
-      return;
-    }
-
+    if (isOfflineMode) { showNotification('error', "Offline: Cannot save changes."); return; }
     setIsSaving(true);
     try {
       await updateReportDetails(selectedReport.id, {
-        custom_title: editTitle,
-        user_notes: editNotes,
-        concern_override: editConcern
+        custom_title: editTitle, user_notes: editNotes, concern_override: editConcern, due_date: editDueDate || undefined
       });
-      const updatedReport = { ...selectedReport, custom_title: editTitle, user_notes: editNotes, concern_override: editConcern };
-      setReports(prev => prev.map(r => r.id === selectedReport.id ? updatedReport : r));
-      setSelectedReport(updatedReport);
+      const updated = { ...selectedReport, custom_title: editTitle, user_notes: editNotes, concern_override: editConcern, due_date: editDueDate };
+      setReports(prev => prev.map(r => r.id === selectedReport.id ? updated : r));
+      setSelectedReport(updated);
       setIsEditMode(false);
-      showNotification('success', "Changes saved successfully.");
-    } catch (err: any) { 
-      showNotification('error', err.message || "Failed to save changes.");
-    } finally { setIsSaving(false); }
+      showNotification('success', "Changes saved.");
+    } catch (err: any) { showNotification('error', err.message || "Failed to save."); } finally { setIsSaving(false); }
   };
 
   const handleDelete = async () => {
     if (!selectedReport) return;
-
-    if (isOfflineMode) {
-      showNotification('error', "Offline: Cannot delete reports.");
-      return;
-    }
-
+    if (isOfflineMode) { showNotification('error', "Offline: Cannot delete."); return; }
     setIsDeleting(true);
     try {
       await deleteHealthReport(selectedReport.id);
       setReports(prev => prev.filter(r => r.id !== selectedReport.id));
       handleCloseModal();
-      showNotification('success', "Report deleted successfully.");
-    } catch (err: any) { 
-      showNotification('error', err.message || "Failed to delete report.");
-    } finally { setIsDeleting(false); }
+      showNotification('success', "Report deleted.");
+    } catch (err: any) { showNotification('error', err.message || "Failed to delete."); } finally { setIsDeleting(false); }
   };
 
-  // --- Filtering ---
   const filteredData = reports.filter(item => {
-    const matchesSearch = (item.custom_title || item.input_summary || item.user_notes || item.ai_summary || '').toLowerCase().includes(searchQuery.toLowerCase());
+    const query = searchQuery.toLowerCase();
+    const matchesSearch = 
+      (item.custom_title && item.custom_title.toLowerCase().includes(query)) ||
+      (item.input_summary && item.input_summary.toLowerCase().includes(query)) ||
+      (item.user_notes && item.user_notes.toLowerCase().includes(query)) ||
+      (item.ai_summary && item.ai_summary.toLowerCase().includes(query));
     const matchesType = filterType === 'All Types' || item.input_type.toLowerCase().includes(filterType.toLowerCase().replace('all types', ''));
     const currentRisk = item.concern_override || item.preliminary_concern || 'Medium';
     const matchesConcern = filterConcern === 'All' || currentRisk === filterConcern;
@@ -250,147 +165,35 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
   });
 
   useEffect(() => { setCurrentPage(1); }, [searchQuery, filterType, filterConcern]);
-  const totalPages = Math.ceil(filteredData.length / itemsPerPage);
   const paginatedData = filteredData.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
-
-  // --- Helper Components ---
 
   const getConcernBadge = (level: string) => {
     const l = level.charAt(0).toUpperCase() + level.slice(1).toLowerCase();
-    const colors = {
+    const colors: any = {
       High: 'bg-red-500/10 text-red-500 border-red-500/20',
       Medium: 'bg-orange-500/10 text-orange-500 border-orange-500/20',
       Low: 'bg-green-500/10 text-green-500 border-green-500/20',
-    } as any;
-    return (
-      <span className={`px-2.5 py-1 rounded-full text-xs font-medium border ${colors[l] || colors.Medium}`}>
-        {l}
-      </span>
-    );
+    };
+    return <span className={`px-2.5 py-1 rounded-full text-xs font-medium border ${colors[l] || colors.Medium}`}>{l}</span>;
   };
 
-  const getTypeIcon = (type: string) => {
-    if (type.includes('image')) return <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>;
-    if (type.includes('audio')) return <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>;
-    if (type.includes('document')) return <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>;
-    return <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>;
-  };
-
-  // ... (Keep DonutChart and BarChart logic as is)
-  const DonutChart = () => {
-    // ... same implementation as before ...
-    const data = [
-      { label: 'Image', value: stats.types.Image, color: '#3b82f6' }, // blue-500
-      { label: 'Audio', value: stats.types.Audio, color: '#22c55e' }, // green-500
-      { label: 'Text', value: stats.types.Text, color: '#f59e0b' }, // amber-500
-      { label: 'Doc', value: stats.types.Doc, color: '#a855f7' }, // purple-500
-    ].filter(d => d.value > 0);
-
-    const total = data.reduce((acc, curr) => acc + curr.value, 0);
-    let cumulativePercent = 0;
-
-    if (total === 0) return (
-      <div className="relative w-32 h-32 rounded-full border-4 border-gray-700 opacity-20 mx-auto flex items-center justify-center">
-        <span className="text-xs">No Data</span>
-      </div>
-    );
-
-    return (
-      <div className="flex items-center gap-8 justify-center">
-        <div className="relative w-40 h-40">
-           <svg viewBox="0 0 100 100" className="transform -rotate-90 w-full h-full">
-             {data.map((slice, i) => {
-               const percent = slice.value / total;
-               const dashArray = `${percent * 314} 314`; 
-               const offset = cumulativePercent * 314;
-               cumulativePercent += percent;
-               return (
-                 <circle
-                   key={i}
-                   cx="50" cy="50" r="40"
-                   fill="transparent"
-                   stroke={slice.color}
-                   strokeWidth="16"
-                   strokeDasharray={dashArray}
-                   strokeDashoffset={-offset}
-                   className="transition-all duration-1000 ease-out"
-                 />
-               );
-             })}
-           </svg>
-           <div className="absolute inset-0 flex flex-col items-center justify-center">
-             <span className="text-sm font-bold text-gray-400">Total</span>
-             <span className="text-2xl font-bold text-gray-900 dark:text-white">{total}</span>
-           </div>
-        </div>
-        
-        <div className="space-y-2">
-           {data.map(d => (
-             <div key={d.label} className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: d.color }}></div>
-                <span className="text-xs text-gray-500 dark:text-gray-400">{d.label} ({Math.round(d.value/total*100)}%)</span>
-             </div>
-           ))}
-        </div>
-      </div>
-    );
-  };
-
-  const BarChart = () => {
-    // ... same implementation as before ...
-    const maxVal = Math.max(...stats.timeline.map(t => t.count), 1);
-    
-    return (
-      <div className="h-48 flex items-end justify-between gap-2 pt-6">
-        {stats.timeline.map((item, i) => {
-          const height = (item.count / maxVal) * 100;
-          return (
-            <div key={i} className="flex flex-col items-center flex-1 group">
-               {/* Tooltip */}
-               <div className="opacity-0 group-hover:opacity-100 absolute -mt-8 bg-gray-800 text-xs text-white px-2 py-1 rounded pointer-events-none transition-opacity z-10 whitespace-nowrap border border-gray-700">
-                  {item.month}: {item.high} High, {item.med} Med
-               </div>
-               
-               {/* Stacked Bar */}
-               <div className="w-full max-w-[24px] bg-gray-200 dark:bg-gray-700/30 rounded-t-sm relative overflow-hidden flex flex-col justify-end" style={{ height: `${Math.max(height, 5)}%` }}>
-                  {item.count > 0 && (
-                    <>
-                      <div style={{ height: `${(item.high / item.count) * 100}%` }} className="bg-red-500/80 w-full transition-all duration-500"></div>
-                      <div style={{ height: `${(item.med / item.count) * 100}%` }} className="bg-orange-500/80 w-full transition-all duration-500"></div>
-                      <div style={{ height: `${(item.low / item.count) * 100}%` }} className="bg-green-500/80 w-full transition-all duration-500"></div>
-                    </>
-                  )}
-               </div>
-               
-               <span className="text-[10px] text-gray-500 mt-2">{item.month}</span>
-            </div>
-          )
-        })}
-        <div className="absolute inset-0 pointer-events-none flex flex-col justify-between text-[10px] text-gray-600 px-1 pb-6 pt-6 -z-10 h-48">
-           <div className="w-full border-t border-dashed border-gray-300 dark:border-gray-700/50"></div>
-           <div className="w-full border-t border-dashed border-gray-300 dark:border-gray-700/50"></div>
-           <div className="w-full border-t border-dashed border-gray-300 dark:border-gray-700/50"></div>
-           <div className="w-full border-t border-dashed border-gray-300 dark:border-gray-700/50"></div>
-        </div>
-      </div>
-    );
+  const getDueDateBadge = (dateStr?: string) => {
+    if (!dateStr) return <span className="text-gray-400 text-xs">-</span>;
+    const d = new Date(dateStr);
+    const today = new Date(); today.setHours(0,0,0,0); d.setHours(0,0,0,0);
+    const isPast = d < today; const isToday = d.getTime() === today.getTime();
+    let cls = 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400';
+    if (isPast) cls = 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 font-bold';
+    else if (isToday) cls = 'bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400 font-bold';
+    else cls = 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400';
+    return <span className={`px-2 py-0.5 rounded text-xs whitespace-nowrap ${cls}`}>{new Date(dateStr).toLocaleDateString()}</span>;
   };
 
   return (
     <div className="flex h-[calc(100vh-64px)] bg-gray-50 dark:bg-[#0f1117] text-gray-900 dark:text-gray-200 font-sans overflow-hidden transition-colors relative">
-      
-      {/* Notification Banner */}
-      {notification && (
-        <NotificationBanner 
-          type={notification.type} 
-          message={notification.message} 
-          onClose={() => setNotification(null)} 
-        />
-      )}
+      {notification && <NotificationBanner type={notification.type} message={notification.message} onClose={() => setNotification(null)} />}
 
-      {/* Sidebar Filters */}
       <aside className="w-64 bg-white dark:bg-[#161b22] border-r border-gray-200 dark:border-gray-800 p-6 flex-shrink-0 hidden md:block overflow-y-auto transition-colors">
-        {/* ... (Existing Sidebar Logic) ... */}
         <RoleGuard allowedRoles={['admin', 'super_admin']}>
            <div className="mb-8 p-3 bg-gray-100 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
              <div className="flex items-center justify-between mb-2">
@@ -408,10 +211,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
           <div className="space-y-2">
             {['All Types', 'Image', 'Audio', 'Text', 'Document'].map(opt => (
               <div key={opt} onClick={() => setFilterType(opt)} className="flex items-center gap-3 cursor-pointer group">
-                <div className={`w-4 h-4 rounded-full border flex items-center justify-center transition-colors ${filterType === opt ? 'border-blue-500' : 'border-gray-300 dark:border-gray-600 group-hover:border-gray-400 dark:group-hover:border-gray-500'}`}>
+                <div className={`w-4 h-4 rounded-full border flex items-center justify-center transition-colors ${filterType === opt ? 'border-blue-500' : 'border-gray-300 dark:border-gray-600 group-hover:border-gray-400'}`}>
                   {filterType === opt && <div className="w-2 h-2 rounded-full bg-blue-500" />}
                 </div>
-                <span className={`text-sm ${filterType === opt ? 'text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300'}`}>{opt}</span>
+                <span className={`text-sm ${filterType === opt ? 'text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400'}`}>{opt}</span>
               </div>
             ))}
           </div>
@@ -422,143 +225,109 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
           <div className="space-y-2">
             {['All', 'Low', 'Medium', 'High'].map(opt => (
                <div key={opt} onClick={() => setFilterConcern(opt)} className="flex items-center gap-3 cursor-pointer group">
-                <div className={`w-4 h-4 rounded-full border flex items-center justify-center transition-colors ${filterConcern === opt ? 'border-blue-500' : 'border-gray-300 dark:border-gray-600 group-hover:border-gray-400 dark:group-hover:border-gray-500'}`}>
+                <div className={`w-4 h-4 rounded-full border flex items-center justify-center transition-colors ${filterConcern === opt ? 'border-blue-500' : 'border-gray-300 dark:border-gray-600 group-hover:border-gray-400'}`}>
                   {filterConcern === opt && <div className="w-2 h-2 rounded-full bg-blue-500" />}
                 </div>
-                <span className={`text-sm ${filterConcern === opt ? 'text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-300'}`}>{opt}</span>
+                <span className={`text-sm ${filterConcern === opt ? 'text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400'}`}>{opt}</span>
               </div>
             ))}
           </div>
         </div>
         
-        <Button variant="secondary" onClick={() => { setFilterType('All Types'); setFilterConcern('All'); setSearchQuery(''); }} className="w-full text-sm">
-          Clear Filters
-        </Button>
+        <Button variant="secondary" onClick={() => { setFilterType('All Types'); setFilterConcern('All'); setSearchQuery(''); }} className="w-full text-sm">Clear Filters</Button>
       </aside>
 
-      {/* Main Content Area */}
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        
-        {/* Header */}
         <div className="p-6 md:p-8 pb-4">
-          {/* Offline Indicator */}
           {isOfflineMode && (
             <div className="mb-6 bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-700/50 p-4 rounded-xl flex items-center gap-3 text-yellow-800 dark:text-yellow-200 shadow-sm animate-fade-in">
-               <div className="p-2 bg-yellow-100 dark:bg-yellow-800/50 rounded-lg">
-                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 5.636a9 9 0 010 12.728m0 0l-2.829-2.829m2.829 2.829L21 21M15.536 8.464a5 5 0 010 7.072m0 0l-2.829-2.829m-4.243 2.829a4.978 4.978 0 01-1.414-2.83m-1.414 5.658a9 9 0 01-2.167-9.238m7.824 2.167a1 1 0 111.414 1.414m-1.414-1.414L3 3m8.293 8.293l1.414 1.414" /></svg>
-               </div>
-               <div>
-                 <p className="font-bold text-sm">You are currently offline</p>
-                 <p className="text-xs opacity-90">Showing cached reports. Some data may be outdated. Editing is disabled.</p>
-               </div>
+               <div className="p-2 bg-yellow-100 dark:bg-yellow-800/50 rounded-lg"><Icons.Offline className="w-5 h-5" /></div>
+               <div><p className="font-bold text-sm">You are currently offline</p><p className="text-xs opacity-90">Showing cached reports. Editing disabled.</p></div>
             </div>
           )}
 
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Your Analysis History</h1>
-          <div className="relative">
-            <svg className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Your Analysis History</h1>
+            <Button onClick={onNewAnalysis} className="flex items-center gap-2"><Icons.NewAnalysis className="w-5 h-5" /> New Analysis</Button>
+          </div>
+
+          <div className="relative" ref={searchContainerRef}>
+            <Icons.Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
             <input 
-              type="text" 
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} onFocus={() => setShowSuggestions(true)}
+              onKeyDown={(e) => { if (e.key === 'Enter') { saveRecentSearch(searchQuery); setShowSuggestions(false); } }}
               placeholder="Search by title, notes, or AI summary..."
-              className="w-full bg-white dark:bg-[#161b22] border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-200 pl-12 pr-4 py-3 rounded-xl focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors shadow-sm"
+              className="w-full bg-white dark:bg-[#161b22] border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-200 pl-12 pr-10 py-3 rounded-xl focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors shadow-sm"
             />
+            {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"><Icons.Close className="w-4 h-4" /></button>}
+            {showSuggestions && recentSearches.length > 0 && (
+              <div className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-[#1c2128] rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 z-50 overflow-hidden animate-fade-in-down">
+                 <div className="px-4 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider bg-gray-50 dark:bg-[#0d1117] flex justify-between items-center border-b border-gray-100 dark:border-gray-800"><span>Recent Searches</span><button onMouseDown={(e) => { e.preventDefault(); setRecentSearches([]); localStorage.removeItem('ht_recent_searches'); }} className="hover:text-red-500 transition-colors">Clear History</button></div>
+                 {recentSearches.map(term => (<button key={term} className="w-full text-left px-4 py-3 text-sm text-gray-700 dark:text-gray-300 hover:bg-blue-50 dark:hover:bg-blue-900/20 flex items-center gap-3 transition-colors border-b border-gray-50 dark:border-gray-800/50 last:border-0" onClick={() => { setSearchQuery(term); setShowSuggestions(false); }}><Icons.Search className="w-4 h-4 text-gray-400 shrink-0" /><span className="truncate">{term}</span></button>))}
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto px-6 md:px-8 pb-8">
-          
-          {/* ANALYTICS CARDS (Bento Grid) */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-            {/* Card 1: Total */}
             <div className="bg-white dark:bg-[#161b22] p-5 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm relative overflow-hidden group">
-               <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                  <svg className="w-16 h-16 text-blue-500" fill="currentColor" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z" /></svg>
-               </div>
+               <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity"><Icons.Dashboard className="w-16 h-16 text-blue-500" /></div>
                <p className="text-sm text-gray-500 font-medium">Total Reports</p>
                <h2 className="text-3xl font-bold text-gray-900 dark:text-white mt-1">{stats.total}</h2>
-               <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-500 mt-4">
-                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-               </div>
             </div>
-
-            {/* Card 2: Avg Concern */}
             <div className="bg-white dark:bg-[#161b22] p-5 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm">
                <p className="text-sm text-gray-500 font-medium">Avg. Concern Level</p>
                <h2 className={`text-3xl font-bold mt-1 ${stats.avgConcern === 'High' ? 'text-red-500' : stats.avgConcern === 'Medium' ? 'text-orange-500' : 'text-green-500'}`}>{stats.avgConcern}</h2>
-               <div className="w-10 h-10 rounded-lg bg-orange-500/10 flex items-center justify-center text-orange-500 mt-4">
-                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-               </div>
             </div>
-
-             {/* Card 3: Types breakdown (Mini text) */}
              <div className="bg-white dark:bg-[#161b22] p-5 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm">
                <p className="text-sm text-gray-500 font-medium mb-3">Analysis Types Breakdown</p>
                <div className="flex justify-between items-end">
-                  <div className="text-center">
-                    <span className="block text-xs text-gray-400">Image</span>
-                    <span className="text-lg font-bold text-gray-900 dark:text-white">{stats.types.Image}</span>
-                  </div>
-                  <div className="text-center">
-                    <span className="block text-xs text-gray-400">Audio</span>
-                    <span className="text-lg font-bold text-gray-900 dark:text-white">{stats.types.Audio}</span>
-                  </div>
-                  <div className="text-center">
-                    <span className="block text-xs text-gray-400">Text</span>
-                    <span className="text-lg font-bold text-gray-900 dark:text-white">{stats.types.Text}</span>
-                  </div>
-                  <div className="text-center">
-                    <span className="block text-xs text-gray-400">Doc</span>
-                    <span className="text-lg font-bold text-gray-900 dark:text-white">{stats.types.Doc}</span>
-                  </div>
+                  {stats.typesData.map(t => (
+                    <div key={t.name} className="text-center"><span className="block text-xs text-gray-400">{t.name}</span><span className="text-lg font-bold text-gray-900 dark:text-white">{t.value}</span></div>
+                  ))}
                </div>
             </div>
-            
-            {/* Card 4: Recent Trend */}
             <div className="bg-white dark:bg-[#161b22] p-5 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm flex flex-col justify-between">
-               <div>
-                 <p className="text-sm text-gray-500 font-medium">Last 30 Days</p>
-                 <h2 className="text-3xl font-bold text-gray-900 dark:text-white mt-1">
-                   {stats.timeline[stats.timeline.length-1]?.count || 0} <span className="text-lg font-normal text-gray-500">Analyses</span>
-                 </h2>
-               </div>
-               <div className="h-10 w-full flex items-end gap-1 mt-2">
-                 {/* Mini Sparkline simulation */}
-                  <svg viewBox="0 0 100 20" className="w-full h-full overflow-visible">
-                    <path 
-                      d="M0 20 C20 20, 20 5, 40 10 S 60 15, 80 5 S 100 0, 100 0" 
-                      fill="none" 
-                      stroke="#3b82f6" 
-                      strokeWidth="2"
-                    />
-                  </svg>
-               </div>
+               <div><p className="text-sm text-gray-500 font-medium">Last 30 Days</p><h2 className="text-3xl font-bold text-gray-900 dark:text-white mt-1">{stats.timeline[stats.timeline.length-1]?.count || 0} <span className="text-lg font-normal text-gray-500">Analyses</span></h2></div>
             </div>
           </div>
 
-          {/* CHARTS ROW */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-             {/* Left: Donut Chart */}
-             <div className="bg-white dark:bg-[#161b22] p-6 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm lg:col-span-1">
+             <div className="bg-white dark:bg-[#161b22] p-6 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm lg:col-span-1 flex flex-col">
                 <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-6">Analysis Distribution by Type</h3>
-                <DonutChart />
+                <div className="flex-1 min-h-[200px] flex justify-center items-center">
+                  <ResponsiveContainer width="100%" height={250}>
+                    <PieChart>
+                      <Pie data={stats.typesData} cx="50%" cy="50%" innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value">
+                        {stats.typesData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.color} />)}
+                      </Pie>
+                      <Tooltip content={<CustomTooltip />} />
+                      <Legend verticalAlign="bottom" height={36} iconType="circle" />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
              </div>
              
-             {/* Right: Bar/Line Chart */}
-             <div className="bg-white dark:bg-[#161b22] p-6 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm lg:col-span-2 relative">
+             <div className="bg-white dark:bg-[#161b22] p-6 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm lg:col-span-2 relative flex flex-col">
                 <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Analysis Timeline & Concern Levels</h3>
-                <div className="flex items-center gap-4 mb-4">
-                   <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-green-500"></div><span className="text-xs text-gray-500 dark:text-gray-400">Low</span></div>
-                   <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-orange-500"></div><span className="text-xs text-gray-500 dark:text-gray-400">Medium</span></div>
-                   <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-red-500"></div><span className="text-xs text-gray-500 dark:text-gray-400">High</span></div>
+                <div className="flex-1 min-h-[200px] mt-4">
+                  <ResponsiveContainer width="100%" height={250}>
+                    <BarChart data={stats.timeline} margin={{ top: 20, right: 30, left: 0, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" opacity={0.3} />
+                      <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} dy={10} />
+                      <YAxis axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12 }} allowDecimals={false} />
+                      <Tooltip content={<CustomTooltip />} cursor={{ fill: '#71717a', opacity: 0.1 }} />
+                      <Legend iconType="circle" />
+                      <Bar dataKey="Low" stackId="a" fill="#22c55e" radius={[0, 0, 4, 4]} />
+                      <Bar dataKey="Medium" stackId="a" fill="#f97316" />
+                      <Bar dataKey="High" stackId="a" fill="#ef4444" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
                 </div>
-                <BarChart />
              </div>
           </div>
 
-          {/* REPORT LIST TABLE */}
           {loading ? (
              <div className="flex justify-center items-center h-32 text-gray-500">Loading history...</div>
           ) : paginatedData.length > 0 ? (
@@ -570,53 +339,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
                     <th className="p-4 text-xs font-semibold text-gray-500 uppercase tracking-wider w-1/3">Title / Summary</th>
                     <th className="p-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Type</th>
                     <th className="p-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Concern</th>
+                    <th className="p-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Follow Up</th>
                     <th className="p-4 pr-6 text-xs font-semibold text-gray-500 uppercase tracking-wider text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
                   {paginatedData.map((row) => (
-                    <tr 
-                      key={row.id} 
-                      onClick={() => handleOpenReport(row)}
-                      className="group hover:bg-gray-50 dark:hover:bg-[#1c2128]/50 transition-colors cursor-pointer"
-                    >
-                      <td className="p-4 pl-6 text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap font-mono">
-                        {new Date(row.created_at).toLocaleDateString()}
-                      </td>
-                      <td className="p-4">
-                        <div className="font-bold text-gray-900 dark:text-gray-200 truncate max-w-xs">
-                          {row.custom_title || row.input_summary || row.input_text || "Untitled Analysis"}
-                        </div>
-                      </td>
-                      <td className="p-4 text-sm text-gray-500 flex items-center gap-2">
-                         {getTypeIcon(row.input_type)}
-                         <span className="capitalize">{row.input_type}</span>
-                      </td>
-                      <td className="p-4">
-                        {getConcernBadge(row.concern_override || row.preliminary_concern || 'Medium')}
-                      </td>
+                    <tr key={row.id} onClick={() => handleOpenReport(row)} className="group hover:bg-gray-50 dark:hover:bg-[#1c2128]/50 transition-colors cursor-pointer">
+                      <td className="p-4 pl-6 text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap font-mono">{new Date(row.created_at).toLocaleDateString()}</td>
+                      <td className="p-4"><div className="font-bold text-gray-900 dark:text-gray-200 truncate max-w-xs">{row.custom_title || row.input_summary || row.input_text || "Untitled Analysis"}</div></td>
+                      <td className="p-4 text-sm text-gray-500 flex items-center gap-2"><span className="capitalize">{row.input_type}</span></td>
+                      <td className="p-4">{getConcernBadge(row.concern_override || row.preliminary_concern || 'Medium')}</td>
+                      <td className="p-4">{getDueDateBadge(row.due_date)}</td>
                       <td className="p-4 pr-6 text-right">
                          <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); onViewDetails?.(row); }}
-                              className="text-xs bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 px-3 py-1.5 rounded-lg transition-colors font-medium"
-                            >
-                              View
-                            </button>
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); handleOpenReport(row); setIsEditMode(true); }}
-                              className="p-1.5 text-gray-400 hover:text-white rounded hover:bg-gray-700 transition-colors"
-                              disabled={isOfflineMode}
-                            >
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-                            </button>
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); handleOpenReport(row); setDeleteConfirmation(true); }}
-                              className="p-1.5 text-gray-400 hover:text-red-500 rounded hover:bg-gray-700 transition-colors"
-                              disabled={isOfflineMode}
-                            >
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                            </button>
+                            <button onClick={(e) => { e.stopPropagation(); onViewDetails?.(row); }} className="text-xs bg-blue-500/10 text-blue-500 hover:bg-blue-500/20 px-3 py-1.5 rounded-lg transition-colors font-medium">View</button>
+                            <button onClick={(e) => { e.stopPropagation(); handleOpenReport(row); setIsEditMode(true); }} className="p-1.5 text-gray-400 hover:text-white rounded hover:bg-gray-700 transition-colors" disabled={isOfflineMode}><Icons.Edit className="w-4 h-4" /></button>
+                            <button onClick={(e) => { e.stopPropagation(); handleOpenReport(row); setDeleteConfirmation(true); }} className="p-1.5 text-gray-400 hover:text-red-500 rounded hover:bg-gray-700 transition-colors" disabled={isOfflineMode}><Icons.Delete className="w-4 h-4" /></button>
                          </div>
                       </td>
                     </tr>
@@ -625,13 +364,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
               </table>
             </div>
           ) : (
-            /* EMPTY STATE */
             <div className="flex flex-col items-center justify-center h-64 border border-dashed border-gray-700 rounded-2xl bg-[#161b22]/50">
-               <div className="w-16 h-16 mb-4 text-gray-600">
-                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
-                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-              </div>
               <h3 className="text-xl font-medium text-white mb-2">No reports found.</h3>
               <p className="text-gray-500 mb-6 text-center max-w-sm">Get started by creating your first health analysis.</p>
               <button onClick={onNewAnalysis} className="bg-blue-600 hover:bg-blue-700 text-white font-medium px-6 py-2 rounded-lg transition-colors">Start Analysis</button>
@@ -640,29 +373,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
         </div>
       </main>
 
-      {/* --- MODAL --- */}
       {selectedReport && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
            <div className="bg-white dark:bg-[#161b22] border border-gray-200 dark:border-gray-700 w-full max-w-3xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] transition-colors">
-              {/* Header */}
               <div className="p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-[#0d1117]">
                  <div>
-                   <h3 className="text-lg font-bold text-gray-900 dark:text-white">
-                     {deleteConfirmation ? 'Delete Analysis?' : isEditMode ? 'Edit Details' : 'Analysis Report'}
-                   </h3>
-                   {!deleteConfirmation && !isEditMode && (
-                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Generated on {new Date(selectedReport.created_at).toLocaleDateString()}</p>
-                   )}
+                   <h3 className="text-lg font-bold text-gray-900 dark:text-white">{deleteConfirmation ? 'Delete Analysis?' : isEditMode ? 'Edit Details' : 'Analysis Report'}</h3>
+                   {!deleteConfirmation && !isEditMode && <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Generated on {new Date(selectedReport.created_at).toLocaleDateString()}</p>}
                  </div>
-                 <button onClick={handleCloseModal} className="text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors">
-                   <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                 </button>
+                 <button onClick={handleCloseModal} className="text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"><Icons.Close className="w-6 h-6" /></button>
               </div>
-              
-              {/* Body */}
-              <div className="p-6 overflow-y-auto">
+              <div className="p-0 overflow-y-auto bg-gray-50 dark:bg-[#0d1117]">
                  {deleteConfirmation ? (
-                    <div className="text-center sm:text-left">
+                    <div className="p-6 text-center sm:text-left">
                        <p className="text-gray-600 dark:text-gray-300 mb-6">Are you sure you want to delete this report? This action cannot be undone.</p>
                        <div className="flex justify-end gap-3">
                           <Button variant="secondary" onClick={() => setDeleteConfirmation(false)}>Cancel</Button>
@@ -670,89 +393,31 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
                        </div>
                     </div>
                  ) : isEditMode ? (
-                    <div className="space-y-4">
+                    <div className="p-6 space-y-4">
                        <div><label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Custom Title</label><input type="text" value={editTitle} onChange={e => setEditTitle(e.target.value)} className="w-full bg-white dark:bg-[#0d1117] border border-gray-300 dark:border-gray-700 rounded-lg p-3 text-gray-900 dark:text-white focus:border-blue-500 focus:outline-none" /></div>
+                       <div><label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Due Date</label><input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)} className="w-full bg-white dark:bg-[#0d1117] border border-gray-300 dark:border-gray-700 rounded-lg p-3 text-gray-900 dark:text-white focus:border-blue-500 focus:outline-none" /></div>
                        <div><label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Notes</label><textarea rows={3} value={editNotes} onChange={e => setEditNotes(e.target.value)} className="w-full bg-white dark:bg-[#0d1117] border border-gray-300 dark:border-gray-700 rounded-lg p-3 text-gray-900 dark:text-white focus:border-blue-500 focus:outline-none" /></div>
                        <div><label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Concern Override</label><select value={editConcern} onChange={e => setEditConcern(e.target.value as HealthRiskLevel)} className="w-full bg-white dark:bg-[#0d1117] border border-gray-300 dark:border-gray-700 rounded-lg p-3 text-gray-900 dark:text-white focus:border-blue-500 focus:outline-none"><option value="Low">Low</option><option value="Medium">Medium</option><option value="High">High</option></select></div>
                        <div className="pt-4 flex justify-end gap-3"><Button variant="secondary" onClick={() => setIsEditMode(false)}>Cancel</Button><Button onClick={handleSaveChanges} disabled={isSaving}>{isSaving ? 'Saving...' : 'Save Changes'}</Button></div>
                     </div>
                  ) : (
-                    <div className="space-y-8">
-                       {/* Top Metadata */}
-                       <div className="flex flex-wrap gap-4 items-center justify-between pb-4 border-b border-gray-100 dark:border-gray-800">
-                          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">{selectedReport.custom_title || selectedReport.input_summary || "Untitled Analysis"}</h2>
-                          <div className="flex items-center gap-3">
-                             {getConcernBadge(selectedReport.concern_override || selectedReport.preliminary_concern || 'Medium')}
-                             <span className="text-xs text-gray-500 dark:text-gray-400 uppercase font-bold tracking-wide bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">{selectedReport.input_type}</span>
-                          </div>
-                       </div>
-
-                       {/* User Notes */}
-                       {selectedReport.user_notes && (
-                         <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800/50 p-4 rounded-lg">
-                           <span className="text-xs font-bold text-yellow-600 dark:text-yellow-500 uppercase block mb-1">Your Notes</span>
-                           <p className="text-sm text-yellow-800 dark:text-gray-300">{selectedReport.user_notes}</p>
-                         </div>
-                       )}
-
-                       {/* AI Analysis Sections */}
-                       <div className="space-y-6">
-                          <div>
-                             <h4 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wider mb-2 flex items-center gap-2">
-                               <span className="w-1 h-4 bg-blue-500 rounded-full"></span>
-                               Executive Summary
-                             </h4>
-                             <p className="text-gray-700 dark:text-gray-300 text-sm leading-relaxed whitespace-pre-wrap">{selectedReport.ai_summary || "No summary available."}</p>
-                          </div>
-
-                          {selectedReport.ai_recommendations && (
-                            <div>
-                               <h4 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wider mb-2 flex items-center gap-2">
-                                 <span className="w-1 h-4 bg-green-500 rounded-full"></span>
-                                 Recommendations
-                               </h4>
-                               <div className="text-gray-700 dark:text-gray-300 text-sm leading-relaxed whitespace-pre-wrap p-4 bg-green-50 dark:bg-green-900/10 rounded-xl border border-green-100 dark:border-green-900/30">
-                                 {selectedReport.ai_recommendations}
+                    <div>
+                       {(() => {
+                         const reconstructedMarkdown = selectedReport.meta?.full_response || `### 1. Executive Summary\n${selectedReport.ai_summary}\n\n### 2. Detailed Analysis\n${selectedReport.ai_details || 'No details.'}\n\n### 4. Recommendations\n${selectedReport.ai_recommendations || 'No recommendations.'}`;
+                         return (
+                           <div className="pb-6">
+                             <HealthReportView markdownContent={reconstructedMarkdown} timestamp={new Date(selectedReport.created_at).getTime()} />
+                             <div className="px-6 md:px-8 mt-4">
+                               {selectedReport.user_notes && <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800/50 p-4 rounded-lg mb-6"><span className="text-xs font-bold text-yellow-600 dark:text-yellow-500 uppercase block mb-1">Notes</span><p className="text-sm text-yellow-800 dark:text-gray-300">{selectedReport.user_notes}</p></div>}
+                               {selectedReport.due_date && <div className="flex items-center gap-2 mb-6"><span className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase">Follow Up Due:</span>{getDueDateBadge(selectedReport.due_date)}</div>}
+                               <div className="pt-6 mt-6 border-t border-gray-200 dark:border-gray-700 flex gap-3 justify-end">
+                                 {!isOfflineMode && <><Button variant="secondary" onClick={() => setIsEditMode(true)}>Edit Details</Button><Button variant="danger" onClick={() => setDeleteConfirmation(true)}>Delete</Button></>}
+                                 <Button onClick={() => onViewDetails?.(selectedReport)}>Open in Chat</Button>
                                </div>
-                            </div>
-                          )}
-
-                          {selectedReport.ai_details && (
-                            <div>
-                               <h4 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wider mb-2 flex items-center gap-2">
-                                 <span className="w-1 h-4 bg-purple-500 rounded-full"></span>
-                                 Detailed Analysis
-                               </h4>
-                               <div className="text-gray-700 dark:text-gray-300 text-sm leading-relaxed whitespace-pre-wrap pl-2 border-l-2 border-gray-200 dark:border-gray-700">
-                                 {selectedReport.ai_details}
-                               </div>
-                            </div>
-                          )}
-                          
-                          {/* Original Input Collapsed View */}
-                          <div className="pt-4">
-                             <details className="group">
-                                <summary className="flex items-center gap-2 text-xs font-semibold text-gray-500 cursor-pointer hover:text-gray-700 dark:hover:text-gray-300 select-none">
-                                   <svg className="w-4 h-4 transition-transform group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
-                                   Show Original Input
-                                </summary>
-                                <div className="mt-2 p-3 bg-gray-50 dark:bg-slate-900 rounded border border-gray-200 dark:border-gray-700 text-xs text-gray-600 dark:text-gray-400 font-mono whitespace-pre-wrap">
-                                   {selectedReport.input_text || selectedReport.input_summary}
-                                </div>
-                             </details>
-                          </div>
-                       </div>
-
-                       {/* Action Footer */}
-                       <div className="pt-6 border-t border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row gap-3">
-                         <Button className="w-full sm:flex-1" onClick={() => onViewDetails?.(selectedReport)}>Open Full Chat View</Button>
-                         {!isOfflineMode && (
-                           <div className="flex gap-3 w-full sm:w-auto">
-                             <Button variant="secondary" className="flex-1 sm:flex-none" onClick={() => setIsEditMode(true)}>Edit Details</Button>
-                             <Button variant="danger" className="flex-1 sm:flex-none" onClick={() => setDeleteConfirmation(true)}>Delete</Button>
+                             </div>
                            </div>
-                         )}
-                       </div>
+                         );
+                       })()}
                     </div>
                  )}
               </div>

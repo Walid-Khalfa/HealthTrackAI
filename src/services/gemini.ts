@@ -1,7 +1,7 @@
 
 import { GoogleGenAI, GenerateContentResponse, Type } from "@google/genai";
 import { Attachment, AttachmentType, HealthRiskLevel } from "../types";
-import { MODEL_NAME, SYSTEM_INSTRUCTION } from "../constants";
+import { MODEL_NAME, AUDIO_MODEL_NAME, SYSTEM_INSTRUCTION } from "../constants";
 import { sanitizeForAI, safeJsonParse } from "../utils/security";
 
 // Helper to safely access environment variables
@@ -72,8 +72,15 @@ ${safePrompt}
     
     parts.push({ text: fullPrompt });
 
+    // Determine model to use
+    // If audio is present, strictly switch to the Native Audio model
+    const hasAudio = attachments.some(a => a.type === AttachmentType.Audio || a.mimeType.startsWith('audio/'));
+    const selectedModel = hasAudio ? AUDIO_MODEL_NAME : MODEL_NAME;
+
+    console.log(`[HealthTrackAI] Using model: ${selectedModel} (Audio Present: ${hasAudio})`);
+
     const response: GenerateContentResponse = await ai.models.generateContent({
-      model: MODEL_NAME,
+      model: selectedModel,
       contents: {
         role: 'user',
         parts: parts

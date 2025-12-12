@@ -1,11 +1,13 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+
+import React, { useState, useRef } from 'react';
 import { Attachment, AttachmentType } from '../types';
 import { Button } from './Button';
 import { AttachmentPreview } from './AttachmentPreview';
 import { getSecureUUID } from '../services/supabaseClient';
+import { Icons } from './Icons';
 
 interface InputAreaProps {
-  onSendMessage: (text: string, attachments: Attachment[]) => void;
+  onSendMessage: (text: string, attachments: Attachment[], title?: string, dueDate?: string) => void;
   isLoading: boolean;
 }
 
@@ -14,6 +16,12 @@ export const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, isLoading }
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isRecording, setIsRecording] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
+  
+  // Camera Controls State
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
+  const [zoom, setZoom] = useState(1);
+  const [zoomRange, setZoomRange] = useState({ min: 1, max: 1 });
+  const [isZoomSupported, setIsZoomSupported] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -29,21 +37,35 @@ export const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, isLoading }
         
         reader.onloadend = () => {
           const base64String = reader.result as string;
-          const type = file.type.startsWith('image') 
-            ? AttachmentType.Image 
-            : file.type === 'application/pdf' 
-              ? AttachmentType.Pdf 
-              : AttachmentType.Audio; // Fallback
+          let type: AttachmentType | undefined;
 
-          const newAtt: Attachment = {
-            id: getSecureUUID(),
-            type,
-            mimeType: file.type,
-            data: base64String, 
-            name: file.name,
-            size: file.size // Capture size
-          };
-          setAttachments(prev => [...prev, newAtt]);
+          if (file.type.startsWith('image')) {
+            type = AttachmentType.Image;
+          } else if (file.type === 'application/pdf') {
+            type = AttachmentType.Pdf;
+          } else if (file.type.startsWith('audio')) {
+            type = AttachmentType.Audio;
+          } else {
+             // Basic fallback based on extension if mime type is missing/generic
+             if (file.name.endsWith('.pdf')) type = AttachmentType.Pdf;
+             else if (file.name.match(/\.(mp3|wav|m4a|ogg)$/i)) type = AttachmentType.Audio;
+             else if (file.name.match(/\.(jpg|jpeg|png|gif|webp)$/i)) type = AttachmentType.Image;
+          }
+
+          if (type) {
+            const newAtt: Attachment = {
+              id: getSecureUUID(),
+              type,
+              mimeType: file.type || 'application/octet-stream',
+              data: base64String, 
+              name: file.name,
+              size: file.size // Capture size
+            };
+            setAttachments(prev => [...prev, newAtt]);
+          } else {
+            console.warn("Unsupported file type:", file.type, file.name);
+            alert(`File type not supported: ${file.name}`);
+          }
         };
         
         reader.readAsDataURL(file);
@@ -57,7 +79,21 @@ export const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, isLoading }
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
+      
+      let mimeType = '';
+      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+        mimeType = 'audio/webm;codecs=opus';
+      } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+        mimeType = 'audio/webm';
+      } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+        mimeType = 'audio/mp4';
+      } else if (MediaRecorder.isTypeSupported('audio/ogg')) {
+        mimeType = 'audio/ogg';
+      }
+      
+      const options = mimeType ? { mimeType } : undefined;
+      const mediaRecorder = new MediaRecorder(stream, options);
+      
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
 
@@ -68,23 +104,30 @@ export const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, isLoading }
       };
 
       mediaRecorder.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/mp3' }); 
+        const finalMimeType = mediaRecorder.mimeType || mimeType || 'audio/webm';
+        const audioBlob = new Blob(audioChunksRef.current, { type: finalMimeType }); 
+        
         const reader = new FileReader();
         reader.onloadend = () => {
            const base64String = reader.result as string;
+           
+           let ext = 'webm';
+           if (finalMimeType.includes('mp4') || finalMimeType.includes('aac')) ext = 'm4a';
+           else if (finalMimeType.includes('ogg')) ext = 'ogg';
+           else if (finalMimeType.includes('wav')) ext = 'wav';
+
            const newAtt: Attachment = {
              id: getSecureUUID(),
              type: AttachmentType.Audio,
-             mimeType: audioBlob.type || 'audio/mp3',
+             mimeType: finalMimeType,
              data: base64String,
-             name: 'Voice_Note.mp3',
+             name: `Voice_Note.${ext}`,
              size: audioBlob.size
            };
            setAttachments(prev => [...prev, newAtt]);
         };
         reader.readAsDataURL(audioBlob);
         
-        // Stop all tracks
         stream.getTracks().forEach(track => track.stop());
       };
 
@@ -104,13 +147,40 @@ export const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, isLoading }
   };
 
   // Camera Logic
-  const startCamera = async () => {
+  const startCamera = async (mode: 'user' | 'environment' = 'environment') => {
     setShowCamera(true);
+    setFacingMode(mode);
+
+    if (videoRef.current && videoRef.current.srcObject) {
+      const stream = videoRef.current.srcObject as MediaStream;
+      stream.getTracks().forEach(track => track.stop());
+    }
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { 
+          facingMode: mode,
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
+        } 
+      });
+      
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
       }
+
+      // Check Zoom Support
+      const track = stream.getVideoTracks()[0];
+      const capabilities = (track.getCapabilities ? track.getCapabilities() : {}) as any;
+      
+      if (capabilities.zoom) {
+        setIsZoomSupported(true);
+        setZoomRange({ min: capabilities.zoom.min, max: capabilities.zoom.max });
+        setZoom(capabilities.zoom.min);
+      } else {
+        setIsZoomSupported(false);
+      }
+
     } catch (err) {
       console.error("Error accessing camera", err);
       setShowCamera(false);
@@ -118,17 +188,44 @@ export const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, isLoading }
     }
   };
 
+  const toggleCameraMode = () => {
+    const newMode = facingMode === 'environment' ? 'user' : 'environment';
+    startCamera(newMode);
+  };
+
+  const handleZoomChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newZoom = parseFloat(e.target.value);
+    setZoom(newZoom);
+    if (videoRef.current && videoRef.current.srcObject) {
+      const stream = videoRef.current.srcObject as MediaStream;
+      const track = stream.getVideoTracks()[0];
+      try {
+        track.applyConstraints({ advanced: [{ zoom: newZoom }] } as any);
+      } catch (error) {
+        console.warn('Zoom not supported:', error);
+      }
+    }
+  };
+
   const capturePhoto = () => {
     if (videoRef.current && canvasRef.current) {
       const context = canvasRef.current.getContext('2d');
       if (context) {
-        // Set canvas dimensions to match video
         canvasRef.current.width = videoRef.current.videoWidth;
         canvasRef.current.height = videoRef.current.videoHeight;
+        
+        if (facingMode === 'user') {
+          context.translate(canvasRef.current.width, 0);
+          context.scale(-1, 1);
+        }
+
         context.drawImage(videoRef.current, 0, 0);
         
+        if (facingMode === 'user') {
+           context.setTransform(1, 0, 0, 1, 0, 0);
+        }
+        
         const dataUrl = canvasRef.current.toDataURL('image/jpeg');
-        // Calculate rough size from base64 (3/4 length)
         const approxSize = Math.ceil((dataUrl.length * 3) / 4);
 
         const newAtt: Attachment = {
@@ -151,6 +248,7 @@ export const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, isLoading }
       stream.getTracks().forEach(track => track.stop());
     }
     setShowCamera(false);
+    setZoom(1); 
   };
 
   // Submit
@@ -166,24 +264,62 @@ export const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, isLoading }
   // Camera Modal
   if (showCamera) {
     return (
-      <div className="fixed inset-0 z-50 bg-black flex flex-col items-center justify-center">
-        <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
+      <div className="fixed inset-0 z-[60] bg-black flex flex-col items-center justify-center relative">
+        <video 
+          ref={videoRef} 
+          autoPlay 
+          playsInline 
+          className={`w-full h-full object-cover transition-transform ${facingMode === 'user' ? 'scale-x-[-1]' : ''}`}
+        />
         <canvas ref={canvasRef} className="hidden" />
-        <div className="absolute bottom-8 flex gap-4">
+        
+        {/* Top Controls: Flip */}
+        <div className="absolute top-6 right-6 z-10">
+           <button 
+             onClick={toggleCameraMode}
+             className="p-3 bg-black/40 backdrop-blur-md rounded-full text-white hover:bg-black/60 transition-colors"
+             title="Flip Camera"
+           >
+             <Icons.FlipCamera className="w-6 h-6" />
+           </button>
+        </div>
+
+        {/* Zoom Slider */}
+        {isZoomSupported && (
+          <div className="absolute bottom-32 w-64 px-4 py-2 bg-black/40 backdrop-blur-md rounded-full flex items-center gap-3 border border-white/10">
+             <span className="text-xs text-white font-medium min-w-[20px]">1x</span>
+             <input 
+               type="range" 
+               min={zoomRange.min} 
+               max={zoomRange.max} 
+               step="0.1" 
+               value={zoom} 
+               onChange={handleZoomChange} 
+               className="w-full h-1 bg-white/30 rounded-lg appearance-none cursor-pointer accent-white" 
+             />
+             <span className="text-xs text-white font-medium min-w-[20px] text-right">{zoom.toFixed(1)}x</span>
+          </div>
+        )}
+
+        {/* Bottom Controls */}
+        <div className="absolute bottom-8 flex gap-12 items-center">
           <button 
             onClick={closeCamera}
-            className="p-4 bg-gray-800 text-white rounded-full"
+            className="p-4 bg-gray-800/80 text-white rounded-full hover:bg-gray-700 transition-colors backdrop-blur-sm border border-white/10"
+            aria-label="Close camera"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <Icons.Close className="w-6 h-6" />
           </button>
+          
           <button 
             onClick={capturePhoto}
-            className="p-5 bg-white rounded-full border-4 border-gray-300 ring-2 ring-white"
+            className="p-1 bg-transparent rounded-full border-4 border-white hover:scale-105 transition-transform"
+            aria-label="Take photo"
           >
-             <div className="w-6 h-6 bg-red-500 rounded-full" />
+             <div className="w-16 h-16 bg-white rounded-full border-4 border-black/20" />
           </button>
+          
+          <div className="w-14 h-14" /> 
         </div>
       </div>
     );
@@ -191,7 +327,7 @@ export const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, isLoading }
 
   return (
     <div className="bg-white dark:bg-slate-800 border-t border-gray-200 dark:border-gray-700 p-4 transition-colors">
-      {/* Attachments Preview - Using our new flexible grid */}
+      {/* Attachments Preview */}
       {attachments.length > 0 && (
         <div className="flex flex-wrap gap-2 mb-4">
           {attachments.map(att => (
@@ -208,7 +344,6 @@ export const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, isLoading }
         <div className="flex items-center gap-2">
           {/* Action Buttons */}
           <div className="flex gap-1">
-             {/* File Input Hidden */}
              <input 
                type="file" 
                multiple 
@@ -218,41 +353,31 @@ export const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, isLoading }
                className="hidden" 
              />
              
-             {/* Attach Button */}
              <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 className="p-2 text-gray-500 hover:text-medical-600 dark:text-gray-400 dark:hover:text-medical-400 rounded-full hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors"
-                title="Attach file"
+                title="Upload files"
              >
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
-                </svg>
+                <Icons.Attach className="w-6 h-6" />
              </button>
 
-             {/* Camera Button */}
              <button
                 type="button"
-                onClick={startCamera}
+                onClick={() => startCamera('environment')}
                 className="p-2 text-gray-500 hover:text-medical-600 dark:text-gray-400 dark:hover:text-medical-400 rounded-full hover:bg-gray-100 dark:hover:bg-slate-700 transition-colors"
                 title="Use Camera"
              >
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zM18.75 10.5h.008v.008h-.008V10.5z" />
-                </svg>
+                <Icons.Camera className="w-6 h-6" />
              </button>
              
-             {/* Mic Button */}
              <button
                 type="button"
                 onClick={isRecording ? stopRecording : startRecording}
                 className={`p-2 rounded-full transition-colors ${isRecording ? 'bg-red-100 dark:bg-red-900/30 text-red-600 animate-pulse' : 'text-gray-500 hover:text-medical-600 dark:text-gray-400 dark:hover:text-medical-400 hover:bg-gray-100 dark:hover:bg-slate-700'}`}
                 title="Record Audio"
              >
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z" />
-                </svg>
+                <Icons.Mic className="w-6 h-6" />
              </button>
           </div>
 
@@ -260,9 +385,9 @@ export const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, isLoading }
             type="text"
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder={isRecording ? "Recording..." : "Describe symptoms or ask anything..."}
-            className="flex-1 border border-gray-300 dark:border-gray-600 rounded-full px-4 py-2 focus:outline-none focus:border-medical-500 focus:ring-1 focus:ring-medical-500 bg-white dark:bg-slate-700 dark:text-white dark:placeholder-gray-400"
-            disabled={isLoading || isRecording}
+            placeholder={isRecording ? "Recording... (Tap mic to stop)" : "Describe symptoms or ask anything..."}
+            className="flex-1 border border-gray-300 dark:border-gray-600 rounded-full px-4 py-2 focus:outline-none focus:border-medical-500 focus:ring-1 focus:ring-medical-500 bg-white dark:bg-slate-700 dark:text-white dark:placeholder-gray-400 transition-colors"
+            disabled={isLoading}
           />
           
           <Button 
@@ -270,9 +395,14 @@ export const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, isLoading }
             disabled={isLoading || (!text.trim() && attachments.length === 0) || isRecording}
             className="rounded-full !p-2"
           >
-             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
-            </svg>
+             {isLoading ? (
+               <svg className="animate-spin h-6 w-6 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+               </svg>
+             ) : (
+               <Icons.Send className="w-6 h-6" />
+             )}
           </Button>
         </div>
       </form>

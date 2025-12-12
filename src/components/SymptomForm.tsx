@@ -1,14 +1,16 @@
+
 import React, { useState, useRef } from 'react';
 import { Attachment, AttachmentType } from '../types';
 import { AttachmentPreview } from './AttachmentPreview';
 import { getSecureUUID } from '../services/supabaseClient';
 
 interface SymptomFormProps {
-  onSubmit: (text: string, attachments: Attachment[]) => void;
+  onSubmit: (text: string, attachments: Attachment[], title?: string) => void;
   isLoading: boolean;
 }
 
 export const SymptomForm: React.FC<SymptomFormProps> = ({ onSubmit, isLoading }) => {
+  const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isRecording, setIsRecording] = useState(false);
@@ -120,7 +122,7 @@ export const SymptomForm: React.FC<SymptomFormProps> = ({ onSubmit, isLoading })
 
   const handleSubmit = () => {
     if (!description && attachments.length === 0) return;
-    onSubmit(description, attachments);
+    onSubmit(description, attachments, title);
   };
 
   // --- UI Components ---
@@ -163,15 +165,35 @@ export const SymptomForm: React.FC<SymptomFormProps> = ({ onSubmit, isLoading })
               <span className="text-xs font-medium px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded">Recommended</span>
             </div>
             
-            <div className="relative">
-              <textarea
-                className="w-full h-48 p-4 text-base border border-gray-200 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-medical-500 focus:border-transparent resize-none bg-gray-50 dark:bg-slate-700/50 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 transition-all"
-                placeholder="Example: I've had a persistent dry cough for 3 days, mild fever in the evenings, and fatigue. No chest pain. It started after a trip to..."
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-              />
-              <div className="absolute bottom-4 right-4 text-xs text-gray-400 dark:text-gray-500 pointer-events-none">
-                {description.length} chars
+            <div className="space-y-4">
+              {/* Title Input */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Report Title (Optional)
+                </label>
+                <input
+                  type="text"
+                  className="w-full p-3 text-base border border-gray-200 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-medical-500 focus:border-transparent bg-gray-50 dark:bg-slate-700/50 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 transition-all"
+                  placeholder="e.g. Recurring Headache, Skin Rash"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                />
+              </div>
+
+              {/* Description Textarea */}
+              <div className="relative">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Detailed Description
+                </label>
+                <textarea
+                  className="w-full h-48 p-4 text-base border border-gray-200 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-medical-500 focus:border-transparent resize-none bg-gray-50 dark:bg-slate-700/50 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 transition-all"
+                  placeholder="Example: I've had a persistent dry cough for 3 days, mild fever in the evenings, and fatigue. No chest pain. It started after a trip to..."
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                />
+                <div className="absolute bottom-4 right-4 text-xs text-gray-400 dark:text-gray-500 pointer-events-none">
+                  {description.length} chars
+                </div>
               </div>
             </div>
             <p className="mt-3 text-sm text-gray-500 dark:text-gray-400 flex items-center gap-2">

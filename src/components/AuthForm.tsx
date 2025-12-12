@@ -1,20 +1,14 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { supabase } from '../services/supabaseClient';
 import { Button } from './Button';
 import { Logo } from './Logo';
 import { BetaBadge } from './BetaBadge';
-import { logger } from '../services/logger';
 
 interface AuthFormProps {
   onSuccess: () => void;
   onCancel: () => void;
 }
-
-const STORAGE_KEY_ATTEMPTS = 'healthtrackai_auth_attempts';
-const STORAGE_KEY_LOCKOUT = 'healthtrackai_auth_lockout_expiry';
-const MAX_ATTEMPTS = 5;
-const LOCKOUT_DURATION_MS = 60000; // 60 seconds
 
 export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, onCancel }) => {
   const [email, setEmail] = useState('');
@@ -26,40 +20,6 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, onCancel }) => {
   const [error, setError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-
-  // SECURITY: Anti-Brute Force State
-  const [lockoutTimer, setLockoutTimer] = useState(0);
-
-  // Initialize lockout state from localStorage on mount
-  useEffect(() => {
-    const checkLockout = () => {
-      const expiry = localStorage.getItem(STORAGE_KEY_LOCKOUT);
-      
-      // 1. Check existing lockout timer
-      if (expiry) {
-        const remaining = Math.ceil((parseInt(expiry) - Date.now()) / 1000);
-        if (remaining > 0) {
-          setLockoutTimer(remaining);
-          return;
-        } else {
-          // Clean up expired lockout
-          localStorage.removeItem(STORAGE_KEY_LOCKOUT);
-          localStorage.removeItem(STORAGE_KEY_ATTEMPTS);
-          setLockoutTimer(0);
-        }
-      }
-
-      // 2. Check if attempts are already over limit (e.g. from previous session/tab)
-      const attempts = parseInt(localStorage.getItem(STORAGE_KEY_ATTEMPTS) || '0');
-      if (attempts >= MAX_ATTEMPTS) {
-         // If over limit but no timer set, set one now
-         const newExpiry = Date.now() + LOCKOUT_DURATION_MS;
-         localStorage.setItem(STORAGE_KEY_LOCKOUT, newExpiry.toString());
-         setLockoutTimer(LOCKOUT_DURATION_MS / 1000);
-      }
-    };
-    checkLockout();
-  }, []);
 
   // Password Validation Logic
   const passwordRequirements = [
@@ -74,33 +34,6 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, onCancel }) => {
   const validRequirementsCount = passwordRequirements.filter(req => req.valid).length;
   const doPasswordsMatch = password === confirmPassword;
 
-  // Countdown timer effect
-  useEffect(() => {
-    let interval: number;
-    if (lockoutTimer > 0) {
-      interval = window.setInterval(() => {
-        setLockoutTimer((prev) => {
-          if (prev <= 1) {
-            // Timer finished in UI - Double check storage before unlocking
-            const expiry = localStorage.getItem(STORAGE_KEY_LOCKOUT);
-            if (expiry && parseInt(expiry) > Date.now()) {
-                return Math.ceil((parseInt(expiry) - Date.now()) / 1000);
-            }
-            
-            localStorage.removeItem(STORAGE_KEY_LOCKOUT);
-            localStorage.removeItem(STORAGE_KEY_ATTEMPTS);
-            setError(null); // Clear lockout error
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-    }
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [lockoutTimer]);
-
   const getStrengthStyles = () => {
     if (password.length === 0) return { label: '', color: 'bg-slate-700', text: 'text-slate-400' };
     if (validRequirementsCount <= 2) return { label: 'Weak', color: 'bg-red-500', text: 'text-red-500' };
@@ -112,42 +45,51 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, onCancel }) => {
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // SECURITY CRITICAL: Direct Storage Check (Bypass React State for immediate blocking)
-    const storedLockout = localStorage.getItem(STORAGE_KEY_LOCKOUT);
-    if (storedLockout) {
-      const expiry = parseInt(storedLockout);
-      if (Date.now() < expiry) {
-        const remaining = Math.ceil((expiry - Date.now()) / 1000);
-        setLockoutTimer(remaining);
-        logger.log('AUTH_BRUTE_FORCE_LOCKOUT', 'MEDIUM', 'Blocked login attempt during active lockout', { email });
-        return; // HARD BLOCK
-      }
-    }
-
-    // Check cumulative attempts directly
-    const currentAttempts = parseInt(localStorage.getItem(STORAGE_KEY_ATTEMPTS) || '0');
-    if (currentAttempts >= MAX_ATTEMPTS) {
-        const expiry = Date.now() + LOCKOUT_DURATION_MS;
-        localStorage.setItem(STORAGE_KEY_LOCKOUT, expiry.toString());
-        setLockoutTimer(LOCKOUT_DURATION_MS / 1000);
-        logger.log('AUTH_BRUTE_FORCE_LOCKOUT', 'HIGH', `Brute force detected (Threshold Check). Account locked.`, { email });
-        return; // HARD BLOCK
-    }
-
     setLoading(true);
     setError(null);
 
     try {
+      // 1. Strict Email Validation
+      // RFC 5322-compliant regex for practical use
+      const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+      if (!email.trim() || !emailRegex.test(email)) {
+        throw new Error("Please enter a valid email address.");
+      }
+      if (email.length > 254) {
+        throw new Error("Email address is too long.");
+      }
+
+      // 2. Password Presence & Length (DoS Prevention)
+      if (!password) {
+        throw new Error("Please enter your password.");
+      }
+      if (password.length > 72) {
+        throw new Error("Password must be under 72 characters.");
+      }
+
       if (isSignUp) {
+        // 3. Password Integrity (SignUp)
         if (!isPasswordStrong) {
-          throw new Error("Please ensure your password meets all requirements.");
+          throw new Error("Please ensure your password meets all security requirements.");
         }
         if (password !== confirmPassword) {
-          throw new Error("Passwords do not match");
+          throw new Error("Passwords do not match.");
         }
-        if (!fullName.trim()) {
+
+        // 4. Full Name Integrity
+        const trimmedName = fullName.trim();
+        if (!trimmedName) {
           throw new Error("Please enter your full name.");
+        }
+        if (trimmedName.length < 2) {
+          throw new Error("Full name is too short (min 2 chars).");
+        }
+        if (trimmedName.length > 100) {
+          throw new Error("Full name is too long (max 100 chars).");
+        }
+        // Basic sanitizer check to prevent simple XSS payloads in profile names
+        if (/[<>&]/.test(trimmedName)) {
+           throw new Error("Full name contains invalid characters (<, >, &).");
         }
         
         const { error } = await supabase.auth.signUp({
@@ -155,7 +97,7 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, onCancel }) => {
           password,
           options: {
             data: {
-              full_name: fullName,
+              full_name: trimmedName,
               avatar_url: '', // Can be extended later
             }
           }
@@ -163,70 +105,22 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, onCancel }) => {
         
         if (error) throw error;
         alert('Signup successful! Please check your email for confirmation (if enabled) or sign in.');
-        
-        // Reset local state on success
         setIsSignUp(false);
         setConfirmPassword('');
         setFullName('');
-        // NOTE: We do not clear attempts on successful signup to prevent "signup cycling" attacks
       } else {
         const { error } = await supabase.auth.signInWithPassword({
           email,
           password,
         });
-        
-        if (error) {
-           // SECURITY: Persistent Failure Tracking
-           const freshAttempts = parseInt(localStorage.getItem(STORAGE_KEY_ATTEMPTS) || '0') + 1;
-           localStorage.setItem(STORAGE_KEY_ATTEMPTS, freshAttempts.toString());
-
-           logger.log('AUTH_LOGIN_FAILED', 'LOW', `Login failed. Attempt ${freshAttempts}`, { email });
-
-           // Check threshold immediately after increment
-           if (freshAttempts >= MAX_ATTEMPTS) {
-             const expiry = Date.now() + LOCKOUT_DURATION_MS;
-             localStorage.setItem(STORAGE_KEY_LOCKOUT, expiry.toString());
-             setLockoutTimer(LOCKOUT_DURATION_MS / 1000);
-             logger.log('AUTH_BRUTE_FORCE_LOCKOUT', 'HIGH', `Brute force detected. Account locked locally.`, { email });
-           }
-           
-           throw error; 
-        }
-        
-        // Reset on success
-        localStorage.removeItem(STORAGE_KEY_ATTEMPTS);
-        localStorage.removeItem(STORAGE_KEY_LOCKOUT);
-        
-        logger.log('AUTH_LOGIN_SUCCESS', 'LOW', 'User logged in successfully', { email });
+        if (error) throw error;
         onSuccess();
       }
     } catch (err: any) {
-      // Get FRESH attempt count for the error message
-      const attemptsNow = parseInt(localStorage.getItem(STORAGE_KEY_ATTEMPTS) || '0');
-      const attemptsLeft = Math.max(0, MAX_ATTEMPTS - attemptsNow);
-
-      if (!isSignUp && (err.message.includes('Invalid login') || err.message.includes('not found') || err.status === 400)) {
-         if (attemptsLeft === 0) {
-            setError(`Too many failed attempts. Account locked.`);
-         } else {
-            setError(`Invalid email or password. ${attemptsLeft} attempt${attemptsLeft !== 1 ? 's' : ''} remaining.`);
-         }
-      } else {
-         setError(err.message || 'An unexpected error occurred');
-      }
+      setError(err.message || 'An unexpected error occurred');
     } finally {
       setLoading(false);
     }
-  };
-
-  const isLocked = lockoutTimer > 0;
-
-  // DEV HELPER: Explicit Reset for testing
-  const resetLockout = () => {
-    localStorage.removeItem(STORAGE_KEY_LOCKOUT);
-    localStorage.removeItem(STORAGE_KEY_ATTEMPTS);
-    setLockoutTimer(0);
-    setError(null);
   };
 
   return (
@@ -285,10 +179,9 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, onCancel }) => {
                     type="text"
                     autoComplete="name"
                     required
-                    disabled={isLocked}
                     value={fullName}
                     onChange={(e) => setFullName(e.target.value)}
-                    className="block w-full pl-10 pr-3 py-3 bg-slate-50 dark:bg-[#0f1623] border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="block w-full pl-10 pr-3 py-3 bg-slate-50 dark:bg-[#0f1623] border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all shadow-sm"
                     placeholder="e.g. John Doe"
                   />
                 </div>
@@ -312,10 +205,9 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, onCancel }) => {
                   type="email"
                   autoComplete="email"
                   required
-                  disabled={isLocked}
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="block w-full pl-10 pr-3 py-3 bg-slate-50 dark:bg-[#0f1623] border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="block w-full pl-10 pr-3 py-3 bg-slate-50 dark:bg-[#0f1623] border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all shadow-sm"
                   placeholder="name@example.com"
                 />
               </div>
@@ -338,16 +230,14 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, onCancel }) => {
                   type={showPassword ? "text" : "password"}
                   autoComplete="current-password"
                   required
-                  disabled={isLocked}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="block w-full pl-10 pr-10 py-3 bg-slate-50 dark:bg-[#0f1623] border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="block w-full pl-10 pr-10 py-3 bg-slate-50 dark:bg-[#0f1623] border border-slate-200 dark:border-slate-800 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-all shadow-sm"
                   placeholder="••••••••"
                 />
                 <button
                   type="button"
-                  disabled={isLocked}
-                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors cursor-pointer focus:outline-none disabled:opacity-50"
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors cursor-pointer focus:outline-none"
                   onClick={() => setShowPassword(!showPassword)}
                 >
                   {showPassword ? (
@@ -408,11 +298,10 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, onCancel }) => {
                     type={showConfirmPassword ? "text" : "password"}
                     autoComplete="new-password"
                     required
-                    disabled={isLocked}
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     onPaste={(e) => e.preventDefault()}
-                    className={`block w-full pl-10 pr-10 py-3 bg-slate-50 dark:bg-[#0f1623] border rounded-xl focus:outline-none focus:ring-2 sm:text-sm text-slate-900 dark:text-white placeholder-slate-400 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${
+                    className={`block w-full pl-10 pr-10 py-3 bg-slate-50 dark:bg-[#0f1623] border rounded-xl focus:outline-none focus:ring-2 sm:text-sm text-slate-900 dark:text-white placeholder-slate-400 transition-all shadow-sm ${
                       confirmPassword && !doPasswordsMatch 
                         ? 'border-red-300 dark:border-red-500/50 focus:border-red-500 focus:ring-red-500/20' 
                         : 'border-slate-200 dark:border-slate-800 focus:border-blue-500 focus:ring-blue-500/50'
@@ -421,8 +310,7 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, onCancel }) => {
                   />
                   <button
                     type="button"
-                    disabled={isLocked}
-                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors cursor-pointer focus:outline-none disabled:opacity-50"
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors cursor-pointer focus:outline-none"
                     onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                   >
                     {showConfirmPassword ? (
@@ -458,41 +346,13 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, onCancel }) => {
                 </div>
               </div>
             )}
-            
-            {/* Lockout Message */}
-            {isLocked && (
-              <div className="rounded-xl bg-yellow-50 dark:bg-yellow-500/10 p-4 border border-yellow-100 dark:border-yellow-500/20 animate-fade-in">
-                <div className="flex">
-                  <div className="flex-shrink-0">
-                    <svg className="h-5 w-5 text-yellow-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                    </svg>
-                  </div>
-                  <div className="ml-3">
-                    <h3 className="text-sm font-medium text-yellow-800 dark:text-yellow-200">
-                      Too many failed attempts
-                    </h3>
-                    <p className="mt-1 text-sm text-yellow-700 dark:text-yellow-300">
-                      Please wait <span className="font-bold">{lockoutTimer}s</span> before trying again.
-                    </p>
-                    <button 
-                      type="button"
-                      onClick={resetLockout}
-                      className="mt-2 text-xs text-yellow-600 dark:text-yellow-400 underline hover:text-yellow-700"
-                    >
-                      [Dev] Reset Lockout
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
 
             {/* Action Buttons */}
             <div className="pt-2 space-y-4">
               <Button
                 type="submit"
-                disabled={loading || isLocked}
-                className="w-full py-3.5 px-4 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white font-semibold rounded-xl shadow-lg shadow-blue-500/30 transition-all transform hover:scale-[1.02] disabled:opacity-70 disabled:scale-100 disabled:shadow-none disabled:cursor-not-allowed"
+                disabled={loading}
+                className="w-full py-3.5 px-4 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white font-semibold rounded-xl shadow-lg shadow-blue-500/30 transition-all transform hover:scale-[1.02] disabled:opacity-70 disabled:scale-100 disabled:shadow-none"
               >
                 {loading ? (
                    <span className="flex items-center justify-center gap-2">
@@ -502,11 +362,7 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, onCancel }) => {
                      </svg>
                      Processing...
                    </span>
-                ) : (
-                  isLocked 
-                    ? `Locked (${lockoutTimer}s)` 
-                    : (isSignUp ? 'Create Account' : 'Sign In')
-                )}
+                ) : (isSignUp ? 'Create Account' : 'Sign In')}
               </Button>
 
               <div className="relative">
@@ -522,15 +378,13 @@ export const AuthForm: React.FC<AuthFormProps> = ({ onSuccess, onCancel }) => {
 
               <button
                 type="button"
-                disabled={isLocked}
                 onClick={() => {
                    setIsSignUp(!isSignUp);
                    setError(null);
                    setConfirmPassword('');
                    setFullName('');
-                   // NOTE: Do NOT clear attempts here. Attempts persist across mode switching.
                 }}
-                className="w-full py-3 px-4 bg-transparent border-2 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 font-semibold rounded-xl hover:bg-slate-50 dark:hover:bg-slate-900 hover:border-slate-300 dark:hover:border-slate-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full py-3 px-4 bg-transparent border-2 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 font-semibold rounded-xl hover:bg-slate-50 dark:hover:bg-slate-900 hover:border-slate-300 dark:hover:border-slate-700 transition-all"
               >
                 {isSignUp ? 'Sign in instead' : 'Create an account'}
               </button>

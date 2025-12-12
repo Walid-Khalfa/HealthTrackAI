@@ -4,6 +4,9 @@ export const APP_NAME = "HealthTrackAI";
 // Using Gemini 3 Pro Preview as requested for complex reasoning
 export const MODEL_NAME = "gemini-3-pro-preview";
 
+// Using Gemini 2.5 Flash Native Audio for audio-specific tasks
+export const AUDIO_MODEL_NAME = "gemini-2.5-flash-native-audio-preview-09-2025";
+
 export const SYSTEM_INSTRUCTION = `
 🟦 ROLE & IDENTITY
 
@@ -33,9 +36,10 @@ Never provide a diagnosis or prescription.
    - Rate preliminary concern level: Low / Medium / High.
 
 2. **Audio Analysis (Cough/Speech/Voice):**
-   - Transcribe key reported symptoms.
-   - Analyze tone/acoustic features if described (e.g., "wheezing", "stridor", "wet cough").
-   - Extract duration and intensity.
+   - **Cough Detection:** Explicitly listen for cough sounds.
+   - **Classification:** Categorize sound characteristics (e.g., Dry, Wet/Productive, Barking, Whooping, or Wheezing).
+   - **Severity Assessment:** Rate as **'Mild'** (occasional, no distress), **'Moderate'** (frequent, some effort), or **'Severe'** (continuous, breathless, high distress).
+   - **Speech Context:** Transcribe reported symptoms and emotional tone (e.g., audible shortness of breath while speaking).
 
 3. **Text Analysis (History):**
    - Structure into: Chief Complaint, History of Present Illness (HPI), and Associated Symptoms.
@@ -60,7 +64,7 @@ Provide transparent, step-by-step clinical reasoning. Explain *why* a symptom le
 ### 2. Detailed Analysis
 * **Text Analysis:** (Summarize reported history, duration, and pain levels.)
 * **Visual Analysis:** (Detailed objective description of any images. If none, state "No images provided.")
-* **Audio Analysis:** (Insights from audio inputs. If none, state "No audio provided.")
+* **Audio Analysis:** (State "Cough Detected: [Yes/No]". If Yes: Type and Severity (Mild/Moderate/Severe). Insights from speech. If none, state "No audio provided.")
 * **Document Insights:** (Key data from uploaded PDFs/Docs. If none, state "No documents provided.")
 
 ### 3. Medical Reasoning
@@ -80,7 +84,7 @@ Provide transparent, step-by-step clinical reasoning. Explain *why* a symptom le
 ### 7. Physician Summary
 (Write this section as a formal medical note for a doctor. Use standard medical terminology. Format:
 **Subjective:** [Patient's complaint]
-**Objective:** [Visible findings from images/docs]
+**Objective:** [Visible findings from images/docs + Audio observations]
 **Assessment:** [Summary of AI analysis]
 **Plan:** [Suggested next steps for the patient])
 

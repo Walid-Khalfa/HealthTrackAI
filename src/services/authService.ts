@@ -1,0 +1,1 @@
+// DEPRECATED: This file has been removed. Auth logic is handled in src/context/AuthContext.tsx

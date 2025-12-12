@@ -1,27 +1,28 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Message, MessageRole, Attachment, HealthReport, HealthRiskLevel } from './types';
+import { Message, MessageRole, Attachment, HealthReport, HealthRiskLevel, FeedbackRating } from './types';
 import { generateHealthAnalysis, classifyHealthRequest } from './services/gemini';
 import { 
   createPendingReport, 
   uploadReportFiles, 
   updateReportWithAIResult, 
-  signOut 
+  signOut,
+  submitFeedback
 } from './services/supabaseClient';
 import { ChatMessage } from './components/ChatMessage';
 import { InputArea } from './components/InputArea';
 import { SymptomForm } from './components/SymptomForm';
 import { Dashboard } from './components/Dashboard';
 import { SettingsPage } from './components/SettingsPage';
+import { TaskList } from './components/TaskList';
 import { LandingPage } from './components/LandingPage';
 import { LegalPage, LegalSection } from './components/LegalPage';
 import { AuthForm } from './components/AuthForm';
 import { Layout } from './components/Layout';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { parseHealthReport } from './utils/reportParser';
-import { checkRateLimit } from './utils/security';
 
-type ViewState = 'landing' | 'form' | 'chat' | 'dashboard' | 'settings' | 'legal';
+type ViewState = 'landing' | 'form' | 'chat' | 'dashboard' | 'settings' | 'legal' | 'tasks';
 
 // Inner component to use Auth Context
 const AppContent = () => {
@@ -109,7 +110,8 @@ const AppContent = () => {
       role: MessageRole.User,
       content: report.input_text || report.input_summary || "Requested analysis",
       timestamp: new Date(report.created_at).getTime(),
-      attachments: [] // In a full implementation, we would fetch and link the files here
+      attachments: [], // In a full implementation, we would fetch and link the files here
+      reportId: report.id
     };
 
     // Use the full markdown response if saved in meta, otherwise construct it
@@ -123,23 +125,35 @@ const AppContent = () => {
       role: MessageRole.Model,
       content: aiContent,
       timestamp: new Date(report.created_at).getTime() + 1000,
+      reportId: report.id,
+      feedback: report.meta?.user_feedback?.rating
     };
 
     setMessages([userMessage, aiMessage]);
     setView('chat');
   };
 
-  const handleSendMessage = async (text: string, attachments: Attachment[]) => {
-    // SECURITY CHECK: Rate Limiting
-    // We check this client-side to prevent rapid-fire API calls causing 'Denial of Wallet'
-    if (user) {
-      const allowed = checkRateLimit(user.id);
-      if (!allowed) {
-        alert("Please wait a moment before sending another request. Rate limit exceeded.");
-        return;
-      }
+  // Feedback Handler
+  const handleFeedback = async (messageId: string, rating: FeedbackRating) => {
+    // Find the message
+    const targetMsg = messages.find(m => m.id === messageId);
+    if (!targetMsg || !targetMsg.reportId) {
+      console.warn("Cannot submit feedback: No report ID linked to message.");
+      return;
     }
 
+    // Optimistic Update
+    setMessages(prev => prev.map(m => m.id === messageId ? { ...m, feedback: rating } : m));
+
+    try {
+      await submitFeedback(targetMsg.reportId, rating);
+    } catch (e) {
+      console.error("Feedback submission failed", e);
+      // Revert if needed (omitted for brevity)
+    }
+  };
+
+  const handleSendMessage = async (text: string, attachments: Attachment[], title?: string, dueDate?: string) => {
     if (view === 'form') {
       setView('chat');
     }
@@ -155,49 +169,18 @@ const AppContent = () => {
     setIsLoading(true);
 
     try {
-      let reportId: string | null = null;
-      let uploadErrors: string[] = [];
-
-      // 1. DATABASE & UPLOAD PHASE
+      let reportId: string | undefined = undefined;
       if (user) {
         try {
-          const report = await createPendingReport(text, attachments);
+          // Now passing title and dueDate to the DB service
+          const report = await createPendingReport(user.id, text, attachments, title, dueDate);
           reportId = report.id;
-          
-          const { successCount, failures } = await uploadReportFiles(reportId, attachments);
-          uploadErrors = failures;
-
-          // Feedback if partial upload failure
-          if (failures.length > 0) {
-             const warningMsg: Message = {
-               id: (Date.now() + 1).toString(),
-               role: MessageRole.Model,
-               content: `⚠️ **Upload Warning:** ${successCount} file(s) uploaded successfully, but ${failures.length} failed.\n\nFailed files:\n${failures.map(f => `- ${f}`).join('\n')}\n\nContinuing analysis with available data...`,
-               timestamp: Date.now(),
-             };
-             setMessages(prev => [...prev, warningMsg]);
-          }
-
+          await uploadReportFiles(reportId, user.id, attachments);
         } catch (dbErr: any) {
-          console.warn("History/Upload failed:", dbErr.message);
-          
-          // CRITICAL: If createPendingReport fails, we might still want to give AI analysis (demo mode),
-          // OR we block it. Here we block if it's a security violation, otherwise warn.
-          if (dbErr.message.includes('Security Violation')) {
-             throw dbErr; // Stop execution
-          }
-          
-          const errorMsg: Message = {
-             id: (Date.now() + 2).toString(),
-             role: MessageRole.Model,
-             content: `⚠️ **System Note:** ${dbErr.message}\nYour analysis will be generated, but it may not be saved to your history.`,
-             timestamp: Date.now(),
-          };
-          setMessages(prev => [...prev, errorMsg]);
+          console.warn("History save unavailable:", dbErr.message);
         }
       }
 
-      // 2. AI GENERATION PHASE
       const historyContext = messages
         .filter(m => m.role === MessageRole.Model)
         .map(m => `AI Response: ${m.content}`)
@@ -209,10 +192,11 @@ const AppContent = () => {
         classifyHealthRequest(text, attachments)
       ]);
 
-      // 3. PERSISTENCE PHASE (Update report with results)
       if (reportId) {
+        // Parse the FULL text response to extract the concern level that matches the PDF/Chat view
         const parsedReport = parseHealthReport(responseText);
         
+        // Normalize 'Moderate' (from parser) to 'Medium' (for DB schema)
         let synchronizedConcern = parsedReport.riskLevel as string;
         if (synchronizedConcern === 'Moderate') synchronizedConcern = 'Medium';
         
@@ -230,7 +214,7 @@ const AppContent = () => {
             summary: aiSummary,
             details: aiDetails,
             recommendations: aiRecs,
-            preliminary_concern: synchronizedConcern as HealthRiskLevel,
+            preliminary_concern: synchronizedConcern as HealthRiskLevel, // Use synchronized concern
             input_type: classification.analysis_type,
             full_response: responseText
           });
@@ -240,30 +224,20 @@ const AppContent = () => {
       }
 
       const aiMessage: Message = {
-        id: (Date.now() + 3).toString(),
+        id: (Date.now() + 1).toString(),
         role: MessageRole.Model,
         content: responseText,
         timestamp: Date.now(),
+        reportId: reportId, // Link this AI response to the report ID so we can rate it later
       };
       setMessages(prev => [...prev, aiMessage]);
 
-    } catch (error: any) {
-      console.error("Workflow failed", error);
-      
-      let friendlyError = "I apologize, but I encountered an unexpected error. Please try again.";
-      
-      // Map known errors
-      if (error.message.includes("API Key")) friendlyError = "Configuration Error: The system is missing a valid API Key.";
-      else if (error.message.includes("quota")) friendlyError = "System Overload: Usage limits exceeded. Please wait a moment.";
-      else if (error.message.includes("Safety")) friendlyError = "Safety Block: The AI detected content that violates safety policies.";
-      else if (error.message.includes("Security Violation")) friendlyError = `⛔ **Security Alert:** ${error.message.replace('Security Violation:', '')}`;
-      else if (error.message.includes("Network")) friendlyError = "Connection Failed: Please check your internet connection.";
-      else if (error.message) friendlyError = `Error: ${error.message}`;
-
+    } catch (error) {
+      console.error("Failed to generate response", error);
       const errorMessage: Message = {
-        id: (Date.now() + 4).toString(),
+        id: (Date.now() + 1).toString(),
         role: MessageRole.Model,
-        content: friendlyError,
+        content: "I apologize, but I encountered an error. Please try again.",
         timestamp: Date.now(),
       };
       setMessages(prev => [...prev, errorMessage]);
@@ -329,6 +303,10 @@ const AppContent = () => {
         <SettingsPage />
       )}
 
+      {view === 'tasks' && (
+        <TaskList />
+      )}
+
       {view === 'form' && (
         <SymptomForm onSubmit={handleSendMessage} isLoading={isLoading} />
       )}
@@ -343,7 +321,11 @@ const AppContent = () => {
                 </div>
               ) : (
                 messages.map(msg => (
-                  <ChatMessage key={msg.id} message={msg} />
+                  <ChatMessage 
+                    key={msg.id} 
+                    message={msg} 
+                    onFeedback={handleFeedback}
+                  />
                 ))
               )}
               
