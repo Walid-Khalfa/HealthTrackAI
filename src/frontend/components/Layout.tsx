@@ -1,17 +1,12 @@
-
-
 import React from 'react';
-import { APP_NAME } from '../../shared/constants';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { APP_NAME } from '../../../shared/constants';
 import { Logo } from './Logo';
-import { AppRole, UserProfile } from '../../shared/types';
+import { AppRole, UserProfile } from '../../../shared/types';
 import { BetaBadge } from './BetaBadge';
-
-type ViewState = 'landing' | 'form' | 'chat' | 'dashboard' | 'settings';
 
 interface LayoutProps {
   children: React.ReactNode;
-  currentView: ViewState;
-  onNavigate: (view: ViewState) => void;
   onSignOut: () => void;
   userEmail?: string;
   userProfile?: UserProfile | null;
@@ -21,14 +16,15 @@ interface LayoutProps {
 
 export const Layout: React.FC<LayoutProps> = ({ 
   children, 
-  currentView, 
-  onNavigate, 
   onSignOut, 
   userEmail,
   userProfile,
   darkMode,
   toggleDarkMode 
 }) => {
+  const navigate = useNavigate();
+  const location = useLocation();
+
   const userRole = userProfile?.role || 'user_free';
   const displayName = userProfile?.full_name || userEmail?.split('@')[0] || 'User';
 
@@ -114,7 +110,7 @@ export const Layout: React.FC<LayoutProps> = ({
         <div className="flex items-center justify-between px-6 h-20 border-b border-gray-100 dark:border-gray-700">
            <div 
              className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity"
-             onClick={() => onNavigate('landing')}
+             onClick={() => navigate('/app/dashboard')}
            >
              <Logo className="w-8 h-8" />
              <span className="font-bold text-lg tracking-tight text-slate-800 dark:text-white">{APP_NAME}</span>
@@ -126,10 +122,10 @@ export const Layout: React.FC<LayoutProps> = ({
           {navItems.map((item) => (
             <button
               key={item.id}
-              onClick={() => onNavigate(item.id as ViewState)}
+              onClick={() => navigate(`/app/${item.id}`)}
               type="button"
               className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-xl transition-all duration-200 ${
-                currentView === item.id || (currentView === 'chat' && item.id === 'form')
+                location.pathname.includes(`/app/${item.id}`) || (location.pathname.includes('/app/chat') && item.id === 'form')
                   ? 'bg-medical-50 text-medical-600 shadow-sm dark:bg-medical-900/30 dark:text-medical-400 border-l-4 border-medical-500'
                   : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-slate-700 dark:hover:text-gray-200 border-l-4 border-transparent'
               }`}
@@ -150,7 +146,7 @@ export const Layout: React.FC<LayoutProps> = ({
             <div className="absolute inset-0 bg-gradient-to-r from-medical-100 to-blue-50 dark:from-slate-700 dark:to-slate-800 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-300 -z-10"></div>
             <div 
                className="flex items-center gap-3 px-3 py-3 rounded-xl mb-2 transition-all cursor-pointer border border-transparent group-hover:border-gray-100 dark:group-hover:border-gray-600"
-               onClick={() => onNavigate('settings')}
+               onClick={() => navigate('/app/settings')}
             >
                {/* Gradient Avatar */}
                <div className={`w-10 h-10 rounded-full bg-gradient-to-br ${avatarGradient} flex items-center justify-center text-white font-bold text-sm shadow-sm ring-2 ring-white dark:ring-slate-700`}>
@@ -191,7 +187,7 @@ export const Layout: React.FC<LayoutProps> = ({
         <header className="md:hidden h-16 bg-white/80 dark:bg-slate-800/80 backdrop-blur-md border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4 sticky top-0 z-20 transition-colors">
            <div 
              className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity"
-             onClick={() => onNavigate('landing')}
+             onClick={() => navigate('/app/dashboard')}
            >
              <Logo className="w-8 h-8" />
              <span className="font-bold text-gray-900 dark:text-white">{APP_NAME}</span>
@@ -216,10 +212,10 @@ export const Layout: React.FC<LayoutProps> = ({
            {navItems.map((item) => (
             <button
               key={item.id}
-              onClick={() => onNavigate(item.id as ViewState)}
+              onClick={() => navigate(`/app/${item.id}`)}
               type="button"
               className={`flex flex-col items-center gap-1 p-2 rounded-lg transition-all ${
-                currentView === item.id || (currentView === 'chat' && item.id === 'form')
+                location.pathname.includes(`/app/${item.id}`) || (location.pathname.includes('/app/chat') && item.id === 'form')
                   ? 'text-medical-600 dark:text-medical-400 bg-medical-50 dark:bg-medical-900/20'
                   : 'text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300'
               }`}

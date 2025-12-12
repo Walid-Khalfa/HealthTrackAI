@@ -1,6 +1,6 @@
 
 import React, { useState, useRef } from 'react';
-import { Attachment, AttachmentType } from '../../shared/types';
+import { Attachment, AttachmentType } from '../../../shared/types';
 import { AttachmentPreview } from './AttachmentPreview';
 
 interface SymptomFormProps {

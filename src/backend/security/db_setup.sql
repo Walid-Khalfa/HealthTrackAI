@@ -7,9 +7,6 @@ create table public.profiles (
   role text default 'user_free', 
   updated_at timestamp with time zone
 );
-alter table public.profiles enable row level security;
-create policy "Users view own profile" on profiles for select using (auth.uid() = id);
-create policy "Users update own profile" on profiles for update using (auth.uid() = id);
 
 -- 2. Health Reports Table
 create table public.health_reports (
@@ -34,8 +31,6 @@ create table public.health_reports (
   meta jsonb,
   flagged boolean default false
 );
-alter table public.health_reports enable row level security;
-create policy "Users manage own reports" on health_reports for all using (auth.uid() = user_id);
 
 -- 3. Health Files Table
 create table public.health_files (
@@ -49,8 +44,6 @@ create table public.health_files (
   mime_type text,
   size_bytes bigint
 );
-alter table public.health_files enable row level security;
-create policy "Users manage own files" on health_files for all using (auth.uid() = user_id);
 
 -- 4. Security Audit Logs (Admin Only)
 create table public.security_audit_logs (
@@ -62,10 +55,6 @@ create table public.security_audit_logs (
   user_email text,
   details jsonb
 );
-alter table public.security_audit_logs enable row level security;
-create policy "Enable insert for authenticated users" on security_audit_logs for insert with check (auth.role() = 'authenticated');
 
 -- 5. Storage Buckets
-insert into storage.buckets (id, name, public) values ('health_files', 'health_files', true);
-create policy "Authenticated users can upload" on storage.objects for insert to authenticated with check (bucket_id = 'health_files');
-create policy "Users can view own files" on storage.objects for select to authenticated using (bucket_id = 'health_files' and auth.uid()::text = (storage.foldername(name))[2]);
+insert into storage.buckets (id, name, public) values ('health_files', 'health_files', false);

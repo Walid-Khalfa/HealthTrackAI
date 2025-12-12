@@ -1,8 +1,7 @@
-
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { supabase } from '../../backend/services/supabaseClient';
-import { getUserProfile } from '../../backend/services/supabaseClient';
-import { AppRole, UserProfile } from '../../shared/types';
+import { supabase } from '../services/supabaseClient';
+import { getUserProfile } from '../services/supabaseClient';
+import { AppRole, UserProfile } from '../types';
 
 interface AuthContextType {
   role: AppRole;
@@ -28,6 +27,9 @@ interface AuthProviderProps {
   children?: ReactNode;
 }
 
+// 15 Minutes in milliseconds
+const INACTIVITY_TIMEOUT = 15 * 60 * 1000; 
+
 export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [role, setRole] = useState<AppRole>('user_free');
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -51,6 +53,42 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       console.error("Error refreshing profile:", e);
     }
   };
+
+  // --- Session Management & Inactivity Timer ---
+  useEffect(() => {
+    if (!user) return;
+
+    let timeoutId: any;
+
+    const handleLogout = async () => {
+      await supabase.auth.signOut();
+      alert("Session expired due to inactivity. Please log in again.");
+    };
+
+    const resetTimer = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      timeoutId = setTimeout(handleLogout, INACTIVITY_TIMEOUT);
+    };
+
+    // Events to monitor for activity
+    const events = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart'];
+
+    // Add listeners
+    events.forEach(event => {
+      window.addEventListener(event, resetTimer);
+    });
+
+    // Initialize timer
+    resetTimer();
+
+    // Cleanup
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      events.forEach(event => {
+        window.removeEventListener(event, resetTimer);
+      });
+    };
+  }, [user]);
 
   useEffect(() => {
     // Initial fetch
@@ -94,8 +132,8 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       } else {
         setRole('user_free');
         setProfile(null);
-        setLoading(false);
       }
+      setLoading(false);
     });
 
     return () => subscription.unsubscribe();

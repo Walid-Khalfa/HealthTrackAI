@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { HealthReport, HealthRiskLevel } from '../../shared/types';
-import { getHealthReports, getAllHealthReports, updateReportDetails, deleteHealthReport } from '../../backend/services/supabaseClient';
 import { Button } from './Button';
 import { useAuth } from '../context/AuthContext';
 import { RoleGuard } from './RoleGuard';
+import { useReportData } from '../hooks/useReportData';
+import { useDashboardFilters } from '../hooks/useDashboardFilters';
+import { useReportModal } from '../hooks/useReportModal';
 
 interface DashboardProps {
   onViewDetails?: (report: HealthReport) => void;
@@ -12,119 +14,51 @@ interface DashboardProps {
 
 export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalysis }) => {
   const { user, profile, isAdmin } = useAuth();
-  const [reports, setReports] = useState<HealthReport[]>([]);
-  const [loading, setLoading] = useState(true);
-  
-  // Offline Mode State
-  const [isOfflineMode, setIsOfflineMode] = useState(false);
-  
-  // Admin State
   const [isAdminMode, setIsAdminMode] = useState(false);
+  const { reports, loading, isOfflineMode, fetchHistory, setReports } = useReportData(isAdminMode);
+  
+  const itemsPerPage = 8; // Retained as a local constant
+  const {
+    searchQuery, setSearchQuery,
+    filterType, setFilterType,
+    filterConcern, setFilterConcern,
+    currentPage, setCurrentPage,
+    totalPages, paginatedData,
+    filteredData,
+  } = useDashboardFilters(reports, itemsPerPage);
 
-  // Filters
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filterType, setFilterType] = useState('All Types');
-  const [filterConcern, setFilterConcern] = useState('All');
-
-  // Pagination
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 8;
-
-  // Modal State
-  const [selectedReport, setSelectedReport] = useState<HealthReport | null>(null);
-  const [isEditMode, setIsEditMode] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [deleteConfirmation, setDeleteConfirmation] = useState(false);
-
-  // Edit Form State
-  const [editTitle, setEditTitle] = useState('');
-  const [editNotes, setEditNotes] = useState('');
-  const [editConcern, setEditConcern] = useState<HealthRiskLevel>('Medium');
-  const [isSaving, setIsSaving] = useState(false);
-
-  // --- Data Fetching ---
-  const fetchHistory = async () => {
-    if (!user) return;
-    
-    // Unique cache key for this user
-    const CACHE_KEY = `healthtrackai_cached_reports_${user.id}`;
-
-    try {
-      setLoading(true);
-      
-      // Check online status explicitly
-      if (!navigator.onLine) {
-        throw new Error("Device is offline");
-      }
-
-      let data: HealthReport[] = [];
-      if (isAdmin && isAdminMode) {
-        data = await getAllHealthReports();
-      } else {
-        data = await getHealthReports(user.id);
-      }
-      
-      setReports(data || []);
-      setIsOfflineMode(false);
-
-      // Cache the last 5 reports if not in admin mode (personal data only)
-      if (!isAdminMode && data && data.length > 0) {
-        try {
-          const toCache = data.slice(0, 5);
-          localStorage.setItem(CACHE_KEY, JSON.stringify(toCache));
-        } catch (e) {
-          console.warn("Failed to cache reports", e);
-        }
-      }
-
-    } catch (err) {
-      console.warn("Failed to load history from network, attempting cache...", err);
-      
-      // Offline / Error Fallback
-      try {
-        const cached = localStorage.getItem(CACHE_KEY);
-        if (cached) {
-          const parsed = JSON.parse(cached);
-          setReports(parsed);
-          setIsOfflineMode(true);
-        } else {
-          setReports([]);
-        }
-      } catch (cacheErr) {
-        console.error("Cache parse error", cacheErr);
-        setReports([]);
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchHistory();
-    
-    // Listen for network recovery
-    const handleOnline = () => fetchHistory();
-    window.addEventListener('online', handleOnline);
-    return () => window.removeEventListener('online', handleOnline);
-  }, [user, isAdmin, isAdminMode]);
+  const {
+    selectedReport,
+    isEditMode, setIsEditMode,
+    isDeleting,
+    deleteConfirmation, setDeleteConfirmation,
+    editTitle, setEditTitle,
+    editNotes, setEditNotes,
+    editConcern, setEditConcern,
+    isSaving,
+    handleOpenReport,
+    handleCloseModal,
+    handleSaveChanges,
+    handleDelete,
+  } = useReportModal({ isOfflineMode, setReports });
 
   // --- Stats Calculation (Memoized) ---
   const stats = useMemo(() => {
-    const total = reports.length;
+    const total = filteredData.length;
     
     // Type Distribution
     const types = {
-      Image: reports.filter(r => r.input_type?.toLowerCase().includes('image')).length,
-      Audio: reports.filter(r => r.input_type?.toLowerCase().includes('audio')).length,
-      Text: reports.filter(r => r.input_type?.toLowerCase().includes('text') && !r.input_type.includes('image') && !r.input_type.includes('audio')).length,
-      Doc: reports.filter(r => r.input_type?.toLowerCase().includes('document')).length,
+      Image: filteredData.filter(r => r.input_type?.toLowerCase().includes('image')).length,
+      Audio: filteredData.filter(r => r.input_type?.toLowerCase().includes('audio')).length,
+      Text: filteredData.filter(r => r.input_type?.toLowerCase().includes('text') && !r.input_type.includes('image') && !r.input_type.includes('audio')).length,
+      Doc: filteredData.filter(r => r.input_type?.toLowerCase().includes('document')).length,
     };
 
     // Risk Stats
     const risks = {
-      High: reports.filter(r => (r.concern_override || r.preliminary_concern) === 'High').length,
-      Medium: reports.filter(r => (r.concern_override || r.preliminary_concern) === 'Medium').length,
-      Low: reports.filter(r => (r.concern_override || r.preliminary_concern) === 'Low').length,
+      High: filteredData.filter(r => (r.concern_override || r.preliminary_concern) === 'High').length,
+      Medium: filteredData.filter(r => (r.concern_override || r.preliminary_concern) === 'Medium').length,
+      Low: filteredData.filter(r => (r.concern_override || r.preliminary_concern) === 'Low').length,
     };
 
     // Determine Avg Concern
@@ -140,7 +74,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
       return { month: monthKey, count: 0, high: 0, med: 0, low: 0 };
     }).reverse();
 
-    reports.forEach(r => {
+    filteredData.forEach(r => {
       const d = new Date(r.created_at);
       const monthKey = d.toLocaleString('default', { month: 'short' });
       const found = last6Months.find(m => m.month === monthKey);
@@ -154,74 +88,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
     });
 
     return { total, types, risks, avgConcern, timeline: last6Months };
-  }, [reports]);
-
-  // --- Handlers ---
-  const handleOpenReport = (report: HealthReport) => {
-    setSelectedReport(report);
-    setIsEditMode(false);
-    setDeleteConfirmation(false);
-    setEditTitle(report.custom_title || '');
-    setEditNotes(report.user_notes || '');
-    setEditConcern(report.concern_override || report.preliminary_concern || 'Medium');
-  };
-
-  const handleCloseModal = () => {
-    setSelectedReport(null);
-    setIsEditMode(false);
-    setDeleteConfirmation(false);
-  };
-
-  const handleSaveChanges = async () => {
-    if (!selectedReport) return;
-    
-    if (isOfflineMode) {
-      alert("You cannot edit reports while offline.");
-      return;
-    }
-
-    setIsSaving(true);
-    try {
-      await updateReportDetails(selectedReport.id, {
-        custom_title: editTitle,
-        user_notes: editNotes,
-        concern_override: editConcern
-      });
-      const updatedReport = { ...selectedReport, custom_title: editTitle, user_notes: editNotes, concern_override: editConcern };
-      setReports(prev => prev.map(r => r.id === selectedReport.id ? updatedReport : r));
-      setSelectedReport(updatedReport);
-      setIsEditMode(false);
-    } catch (err) { alert("Failed to save changes."); } finally { setIsSaving(false); }
-  };
-
-  const handleDelete = async () => {
-    if (!selectedReport) return;
-
-    if (isOfflineMode) {
-      alert("You cannot delete reports while offline.");
-      return;
-    }
-
-    setIsDeleting(true);
-    try {
-      await deleteHealthReport(selectedReport.id);
-      setReports(prev => prev.filter(r => r.id !== selectedReport.id));
-      handleCloseModal();
-    } catch (err) { alert("Failed to delete report."); } finally { setIsDeleting(false); }
-  };
-
-  // --- Filtering ---
-  const filteredData = reports.filter(item => {
-    const matchesSearch = (item.custom_title || item.input_summary || item.user_notes || item.ai_summary || '').toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesType = filterType === 'All Types' || item.input_type.toLowerCase().includes(filterType.toLowerCase().replace('all types', ''));
-    const currentRisk = item.concern_override || item.preliminary_concern || 'Medium';
-    const matchesConcern = filterConcern === 'All' || currentRisk === filterConcern;
-    return matchesSearch && matchesType && matchesConcern;
-  });
-
-  useEffect(() => { setCurrentPage(1); }, [searchQuery, filterType, filterConcern]);
-  const totalPages = Math.ceil(filteredData.length / itemsPerPage);
-  const paginatedData = filteredData.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+  }, [filteredData]);
 
   // --- Helper Components ---
 
@@ -510,11 +377,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onViewDetails, onNewAnalys
              {/* Right: Bar/Line Chart */}
              <div className="bg-white dark:bg-[#161b22] p-6 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm lg:col-span-2 relative">
                 <h3 className="text-lg font-bold text-white mb-2">Analysis Timeline & Concern Levels</h3>
-                <div className="flex items-center gap-4 mb-4">
-                   <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-green-500"></div><span className="text-xs text-gray-400">Low</span></div>
-                   <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-orange-500"></div><span className="text-xs text-gray-400">Medium</span></div>
-                   <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-red-500"></div><span className="text-xs text-gray-400">High</span></div>
-                </div>
+                <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-green-500"></div><span className="text-xs text-gray-400">Low</span></div>
+                <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-orange-500"></div><span className="text-xs text-gray-400">Medium</span></div>
+                <div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-red-500"></div><span className="text-xs text-gray-400">High</span></div>
                 <BarChart />
              </div>
           </div>

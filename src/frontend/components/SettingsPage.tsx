@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Button } from './Button';
 import { getUserProfile, updateUserProfile, upgradeToPro } from '../../backend/services/supabaseClient';
-import { UserProfile } from '../types';
+import { UserProfile } from '../../shared/types';
 
 export const SettingsPage: React.FC = () => {
   const { user, role, refreshRole } = useAuth();

@@ -5,21 +5,18 @@ import { HealthReport, Attachment, AttachmentType, HealthRiskLevel, UserProfile 
 
 // --- Supabase Initialization ---
 
-// Hard-coded fallback credentials to ensure the app runs in preview environments (like AI Studio)
-// where .env files might not be loaded reliably.
-const FALLBACK_SUPABASE_URL = "https://cfdvtdqjxlequhnmknsk.supabase.co";
-const FALLBACK_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNmZHZ0ZHFqeGxlcXVobm1rbnNrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjUxMDEyMDIsImV4cCI6MjA4MDY3NzIwMn0.uPQayxZ2bPLxWaVLqCYxVchRE85dk1nIeHp876KN4qA";
-
 // Safely get Supabase credentials from Vite's env variables, ensuring they are not empty.
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_URL.trim() !== ''
-  ? import.meta.env.VITE_SUPABASE_URL
-  : FALLBACK_SUPABASE_URL;
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY && import.meta.env.VITE_SUPABASE_ANON_KEY.trim() !== ''
-  ? import.meta.env.VITE_SUPABASE_ANON_KEY
-  : FALLBACK_SUPABASE_ANON_KEY;
+if (!supabaseUrl || supabaseUrl.trim() === '') {
+  throw new Error('VITE_SUPABASE_URL is not defined or is empty. Please set it in your .env file.');
+}
+if (!supabaseAnonKey || supabaseAnonKey.trim() === '') {
+  throw new Error('VITE_SUPABASE_ANON_KEY is not defined or is empty. Please set it in your .env file.');
+}
 
-// Initialize the client. The logic above guarantees we never pass empty strings.
+// Initialize the client. Environment variables must be set.
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 /**
@@ -257,8 +254,14 @@ export const getHealthReports = async (userId: string) => {
 
 /**
  * Helper: Fetch ALL reports (Admin only)
+ * @param userRole - The role of the currently authenticated user.
  */
-export const getAllHealthReports = async () => {
+export const getAllHealthReports = async (userRole: string) => {
+  if (userRole !== 'admin' && userRole !== 'service_role') { // Assuming 'admin' and 'service_role' are valid admin roles
+    console.warn('Unauthorized attempt to fetch all reports. User role:', userRole);
+    return [];
+  }
+
   const { data, error } = await supabase
     .from('health_reports')
     .select('*')
@@ -376,7 +379,8 @@ const validateFileSignature = async (blob: Blob, mimeType: string): Promise<bool
     case 'audio/mpeg': // MP3 ID3
       return header.startsWith('494433') || header.startsWith('FFF'); 
     default:
-      return true; 
+      // CRITICAL: Disallow unknown types. Only explicitly allowed MIME types should pass.
+      return false; 
   }
 };
 

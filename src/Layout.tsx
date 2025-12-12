@@ -1,1 +1,0 @@
-// DEPRECATED: This file has been removed. Use src/components/Layout.tsx instead.
