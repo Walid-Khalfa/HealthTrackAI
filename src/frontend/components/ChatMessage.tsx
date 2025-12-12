@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Message, MessageRole } from '../types';
+import { Message, MessageRole } from '../../shared/types';
 import { AttachmentPreview } from './AttachmentPreview';
 import { HealthReportView } from './HealthReportView';
 

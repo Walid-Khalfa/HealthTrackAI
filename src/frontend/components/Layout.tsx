@@ -1,9 +1,9 @@
 
 
 import React from 'react';
-import { APP_NAME } from '../constants';
+import { APP_NAME } from '../../shared/constants';
 import { Logo } from './Logo';
-import { AppRole, UserProfile } from '../types';
+import { AppRole, UserProfile } from '../../shared/types';
 import { BetaBadge } from './BetaBadge';
 
 type ViewState = 'landing' | 'form' | 'chat' | 'dashboard' | 'settings';

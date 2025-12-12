@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { APP_NAME } from '../constants';
+import { APP_NAME } from '../../shared/constants';
 import { Logo } from './Logo';
 import { LegalSection } from './LegalPage';
 import { BetaBadge } from './BetaBadge';

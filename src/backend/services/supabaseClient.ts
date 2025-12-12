@@ -1,20 +1,25 @@
 
 
 import { createClient } from '@supabase/supabase-js';
-import { HealthReport, Attachment, AttachmentType, HealthRiskLevel, UserProfile } from '../types';
+import { HealthReport, Attachment, AttachmentType, HealthRiskLevel, UserProfile } from '../../shared/types';
 
-// Helper to safely access environment variables without crashing in browser
-const getEnv = (key: string, fallback: string): string => {
-  if (typeof process !== 'undefined' && process.env && process.env[key]) {
-    return process.env[key] as string;
-  }
-  return fallback;
-};
+// --- Supabase Initialization ---
 
-// NOTE: In a production environment, these should be environment variables.
-const supabaseUrl = getEnv('SUPABASE_URL', 'https://cfdvtdqjxlequhnmknsk.supabase.co');
-const supabaseAnonKey = getEnv('SUPABASE_ANON_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNmZHZ0ZHFqeGxlcXVobm1rbnNrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjUxMDEyMDIsImV4cCI6MjA4MDY3NzIwMn0.uPQayxZ2bPLxWaVLqCYxVchRE85dk1nIeHp876KN4qA');
+// Hard-coded fallback credentials to ensure the app runs in preview environments (like AI Studio)
+// where .env files might not be loaded reliably.
+const FALLBACK_SUPABASE_URL = "https://cfdvtdqjxlequhnmknsk.supabase.co";
+const FALLBACK_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNmZHZ0ZHFqeGxlcXVobm1rbnNrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjUxMDEyMDIsImV4cCI6MjA4MDY3NzIwMn0.uPQayxZ2bPLxWaVLqCYxVchRE85dk1nIeHp876KN4qA";
 
+// Safely get Supabase credentials from Vite's env variables, ensuring they are not empty.
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_URL.trim() !== ''
+  ? import.meta.env.VITE_SUPABASE_URL
+  : FALLBACK_SUPABASE_URL;
+
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY && import.meta.env.VITE_SUPABASE_ANON_KEY.trim() !== ''
+  ? import.meta.env.VITE_SUPABASE_ANON_KEY
+  : FALLBACK_SUPABASE_ANON_KEY;
+
+// Initialize the client. The logic above guarantees we never pass empty strings.
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 /**

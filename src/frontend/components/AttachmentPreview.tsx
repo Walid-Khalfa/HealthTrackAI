@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { Attachment, AttachmentType } from '../types';
+import { Attachment, AttachmentType } from '../../shared/types';
 
 interface AttachmentPreviewProps {
   attachment: Attachment;

@@ -49,134 +49,52 @@ HealthTrackAI implements rigorous security controls to protect user data and pre
 ## 🚀 Getting Started
 
 ### 1. Prerequisites
-*   Node.js (v18 or higher)
-*   npm or yarn
 *   A **Supabase** project (Free tier works).
-*   A **Google Cloud** project with Gemini API enabled.
+*   A **Google AI Studio** project with the Gemini API enabled.
 
-### 2. Installation
+### 2. Environment Configuration (Google AI Studio)
 
-Clone the repository and install dependencies:
+This application is optimized for Google AI Studio.
 
-```bash
-git clone https://github.com/Walid-Khalfa/healthtrackai.git
-cd healthtrackai
-npm install
-```
+1.  **Secrets**: In the AI Studio editor, go to the "Secrets" panel (key icon).
+2.  **Add Secrets**: Create the following secrets. The app will automatically use them.
+    *   `GEMINI_API_KEY`: Your Gemini API key.
+    *   `VITE_SUPABASE_URL`: Your Supabase project URL.
+    *   `VITE_SUPABASE_ANON_KEY`: Your Supabase publishable anonymous key.
 
-### 3. Environment Configuration
+> **Note**: The app includes a fallback for Supabase credentials, allowing the UI to run even if secrets are not configured. However, database and authentication features will not work until the secrets are set.
 
-Create a `.env` file in the root directory:
+### 3. Database Setup (Supabase)
 
-```env
-# Gemini API Key (Required for AI features)
-API_KEY=your_gemini_api_key_here
+Go to your Supabase SQL Editor and run the `db_setup.sql` script located in the root of this project. This will set up all the necessary tables, policies, and storage buckets.
 
-# Supabase Configuration (Required for Auth/DB)
-VITE_SUPABASE_URL=your_supabase_project_url
-VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
-```
+### 4. Running the App
 
-### 4. Database Setup (Supabase)
-
-Go to your Supabase SQL Editor and run the following schema to set up Auth, Tables, Storage, and RLS policies.
-
-```sql
--- 1. Profiles Table
-create table public.profiles (
-  id uuid references auth.users not null primary key,
-  email text,
-  full_name text,
-  avatar_url text,
-  role text default 'user_free', 
-  updated_at timestamp with time zone
-);
-alter table public.profiles enable row level security;
-create policy "Users view own profile" on profiles for select using (auth.uid() = id);
-create policy "Users update own profile" on profiles for update using (auth.uid() = id);
-
--- 2. Health Reports Table
-create table public.health_reports (
-  id uuid default gen_random_uuid() primary key,
-  user_id uuid references auth.users not null,
-  created_at timestamp with time zone default now(),
-  input_text text,
-  input_summary text,
-  input_type text,
-  ai_summary text,
-  ai_details text,
-  ai_recommendations text,
-  preliminary_concern text,
-  custom_title text,
-  user_notes text,
-  concern_override text,
-  due_date timestamp with time zone,
-  has_images boolean default false,
-  has_audio boolean default false,
-  has_documents boolean default false,
-  status text default 'pending',
-  meta jsonb,
-  flagged boolean default false
-);
-alter table public.health_reports enable row level security;
-create policy "Users manage own reports" on health_reports for all using (auth.uid() = user_id);
-
--- 3. Health Files Table
-create table public.health_files (
-  id uuid default gen_random_uuid() primary key,
-  report_id uuid references public.health_reports on delete cascade,
-  user_id uuid references auth.users not null,
-  created_at timestamp with time zone default now(),
-  file_type text,
-  storage_path text not null,
-  original_name text,
-  mime_type text,
-  size_bytes bigint
-);
-alter table public.health_files enable row level security;
-create policy "Users manage own files" on health_files for all using (auth.uid() = user_id);
-
--- 4. Security Audit Logs (Admin Only)
-create table public.security_audit_logs (
-  id uuid default gen_random_uuid() primary key,
-  created_at timestamp with time zone default now(),
-  event_type text,
-  severity text,
-  user_id uuid,
-  user_email text,
-  details jsonb
-);
-alter table public.security_audit_logs enable row level security;
-create policy "Enable insert for authenticated users" on security_audit_logs for insert with check (auth.role() = 'authenticated');
-
--- 5. Storage Buckets
-insert into storage.buckets (id, name, public) values ('health_files', 'health_files', true);
-create policy "Authenticated users can upload" on storage.objects for insert to authenticated with check (bucket_id = 'health_files');
-create policy "Users can view own files" on storage.objects for select to authenticated using (bucket_id = 'health_files' and auth.uid()::text = (storage.foldername(name))[2]);
-```
-
-### 5. Running the App
-
-Start the development server:
-
-```bash
-npm run dev
-```
-
-Open `http://localhost:5173` (or the port shown in your terminal) to view the app.
+Click the **"Run"** button in the Google AI Studio toolbar. The preview panel will open automatically and display the application.
 
 ---
 
 ## 🔧 Troubleshooting
 
-### "Supabase credentials missing"
-The app includes a hard-coded fallback for demo purposes. If you see this, check that your `.env` file is present and named correctly. In production, ensure environment variables are set in your platform dashboard (Vercel, Netlify, etc.).
-
-### "html2pdf not found"
-The PDF export feature relies on an external CDN script. If you are offline or your firewall blocks CDNs, the button will automatically fallback to the native browser print dialog (`window.print()`).
+### Content Security Policy (CSP) Errors
+*   **Problem**: The browser console shows errors related to blocked scripts or resources.
+*   **Cause**: This app is designed to run without external CDN scripts to enhance security. It relies on locally served or browser-native features. The `index.html` file includes a restrictive CSP.
+*   **Solution**: Do not add external script tags. If a feature is needed, find a way to implement it locally or use a browser-native alternative (like `window.print()` instead of a PDF library).
 
 ### CORS Errors
-If you see CORS errors when uploading files, ensure your Supabase Storage bucket CORS policy is configured to allow requests from your domain (or `*` for development).
+*   **Problem**: Network errors in the console when uploading files or connecting to Supabase.
+*   **Cause**: Your Supabase project is not configured to accept requests from the AI Studio preview domain.
+*   **Solution**:
+    1.  Go to your Supabase Project Dashboard.
+    2.  Navigate to `Project Settings` -> `API`.
+    3.  Under the "CORS Configuration" section, add the AI Studio preview URL (e.g., `https://*.google.aistudio.dev`) to the list of allowed origins. For local development, you can add `http://localhost:3000`.
+
+### Supabase Preview Mode / "Credentials Missing"
+*   **Problem**: The app shows a "Fallback Mode" banner or you can't log in.
+*   **Cause**: The AI Studio environment may not have loaded your secrets correctly, or they are missing.
+*   **Solution**:
+    1.  Verify that the `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` secrets are correctly set in the AI Studio "Secrets" panel.
+    2.  The app has a built-in fallback Supabase configuration that allows the UI to render without valid credentials. This is normal for a read-only preview. Full functionality is restored once the secrets are loaded.
 
 ---
 

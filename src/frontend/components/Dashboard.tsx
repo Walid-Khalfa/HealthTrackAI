@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { HealthReport, HealthRiskLevel } from '../types';
-import { getHealthReports, getAllHealthReports, updateReportDetails, deleteHealthReport } from '../services/supabaseClient';
+import { HealthReport, HealthRiskLevel } from '../../shared/types';
+import { getHealthReports, getAllHealthReports, updateReportDetails, deleteHealthReport } from '../../backend/services/supabaseClient';
 import { Button } from './Button';
 import { useAuth } from '../context/AuthContext';
 import { RoleGuard } from './RoleGuard';

@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Button } from './Button';
-import { getUserProfile, updateUserProfile, upgradeToPro } from '../services/supabaseClient';
+import { getUserProfile, updateUserProfile, upgradeToPro } from '../../backend/services/supabaseClient';
 import { UserProfile } from '../types';
 
 export const SettingsPage: React.FC = () => {

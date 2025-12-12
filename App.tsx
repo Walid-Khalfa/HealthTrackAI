@@ -1,24 +1,24 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Message, MessageRole, Attachment, HealthReport, HealthRiskLevel } from './types';
-import { generateHealthAnalysis, classifyHealthRequest } from './services/gemini';
+import { Message, MessageRole, Attachment, HealthReport, HealthRiskLevel } from './src/shared/types';
+import { generateHealthAnalysis, classifyHealthRequest } from './src/backend/services/gemini';
 import { 
   createPendingReport, 
   uploadReportFiles, 
   updateReportWithAIResult, 
   signOut 
-} from './services/supabaseClient';
-import { ChatMessage } from './components/ChatMessage';
-import { InputArea } from './components/InputArea';
-import { SymptomForm } from './components/SymptomForm';
-import { Dashboard } from './components/Dashboard';
-import { SettingsPage } from './components/SettingsPage';
-import { LandingPage } from './components/LandingPage';
-import { LegalPage, LegalSection } from './components/LegalPage';
-import { AuthForm } from './components/AuthForm';
-import { Layout } from './components/Layout';
-import { AuthProvider, useAuth } from './context/AuthContext';
-import { parseHealthReport } from './utils/reportParser';
+} from './src/backend/services/supabaseClient';
+import { ChatMessage } from './src/frontend/components/ChatMessage';
+import { InputArea } from './src/frontend/components/InputArea';
+import { SymptomForm } from './src/frontend/components/SymptomForm';
+import { Dashboard } from './src/frontend/components/Dashboard';
+import { SettingsPage } from './src/frontend/components/SettingsPage';
+import { LandingPage } from './src/frontend/components/LandingPage';
+import { LegalPage, LegalSection } from './src/frontend/components/LegalPage';
+import { AuthForm } from './src/frontend/components/AuthForm';
+import { Layout } from './src/frontend/components/Layout';
+import { AuthProvider, useAuth } from './src/frontend/context/AuthContext';
+import { parseHealthReport } from './src/shared/utils/reportParser';
 
 type ViewState = 'landing' | 'form' | 'chat' | 'dashboard' | 'settings' | 'legal';
 
@@ -246,7 +246,7 @@ const AppContent = () => {
     );
   }
 
-  if (view === 'landing') {
+  if (!user) {
     return (
       <LandingPage 
         onStart={handleStartAnalysis} 

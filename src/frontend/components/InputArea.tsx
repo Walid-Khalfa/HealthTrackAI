@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Attachment, AttachmentType } from '../types';
+import { Attachment, AttachmentType } from '../../shared/types';
 import { Button } from './Button';
 import { AttachmentPreview } from './AttachmentPreview';
 

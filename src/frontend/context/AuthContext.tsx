@@ -1,8 +1,8 @@
 
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { supabase } from '../services/supabaseClient';
-import { getUserProfile } from '../services/supabaseClient';
-import { AppRole, UserProfile } from '../types';
+import { supabase } from '../../backend/services/supabaseClient';
+import { getUserProfile } from '../../backend/services/supabaseClient';
+import { AppRole, UserProfile } from '../../shared/types';
 
 interface AuthContextType {
   role: AppRole;
@@ -94,8 +94,8 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       } else {
         setRole('user_free');
         setProfile(null);
+        setLoading(false);
       }
-      setLoading(false);
     });
 
     return () => subscription.unsubscribe();

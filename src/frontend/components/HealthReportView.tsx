@@ -1,7 +1,7 @@
 
 
 import React from 'react';
-import { parseHealthReport, ParsedReport } from '../utils/reportParser';
+import { parseHealthReport, ParsedReport } from '../../shared/utils/reportParser';
 import { Logo } from './Logo';
 
 interface HealthReportViewProps {
@@ -9,39 +9,27 @@ interface HealthReportViewProps {
   timestamp: number;
 }
 
-declare var html2pdf: any;
-
 export const HealthReportView: React.FC<HealthReportViewProps> = ({ markdownContent, timestamp }) => {
   const report: ParsedReport = parseHealthReport(markdownContent);
 
   const handleDownloadPDF = () => {
-    const element = document.getElementById(`report-${timestamp}`);
-    const opt = {
-      margin: [10, 10, 10, 10], // top, left, bottom, right in mm
-      filename: `HealthTrackAI_Report_${new Date(timestamp).toISOString().split('T')[0]}.pdf`,
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true, letterRendering: true },
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-    };
+    // Graceful fallback to the browser's print functionality, which is more reliable
+    // and avoids Content Security Policy (CSP) issues with external scripts.
+    const logoEl = document.getElementById(`report-logo-${timestamp}`);
+    const reportEl = document.getElementById(`report-${timestamp}`);
 
-    if (typeof html2pdf !== 'undefined') {
-      // Temporarily show the logo header for the PDF
-      const logoEl = document.getElementById(`report-logo-${timestamp}`);
-      if(logoEl) logoEl.classList.remove('hidden');
-      if(logoEl) logoEl.classList.add('flex');
+    // Temporarily apply print-specific styles
+    document.body.classList.add('print-mode');
+    if (logoEl) logoEl.classList.replace('hidden', 'flex');
+    if (reportEl) reportEl.classList.add('print-styles');
 
-      // Adjust styles for print
-      element?.classList.add('pdf-print-mode');
+    // Trigger the print dialog
+    window.print();
 
-      html2pdf().set(opt).from(element).save().then(() => {
-         // Reset styles
-         if(logoEl) logoEl.classList.add('hidden');
-         if(logoEl) logoEl.classList.remove('flex');
-         element?.classList.remove('pdf-print-mode');
-      });
-    } else {
-      alert("PDF Generator is initializing. Please try again in a moment.");
-    }
+    // Clean up styles after printing
+    document.body.classList.remove('print-mode');
+    if (logoEl) logoEl.classList.replace('flex', 'hidden');
+    if (reportEl) reportEl.classList.remove('print-styles');
   };
 
   const getRiskStyles = (risk: string) => {
