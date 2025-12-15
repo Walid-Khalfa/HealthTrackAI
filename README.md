@@ -108,6 +108,17 @@ This application is optimized for one-click setup in Google AI Studio.
     ```
     The application will be available at `http://localhost:5173` (or another port if 5173 is in use).
 
+### Module import aliases
+
+TypeScript and Vite are configured with `baseUrl: ./src` and the following path aliases:
+
+- `@frontend/*` → `src/frontend/*`
+- `@backend/*` → `src/backend/*`
+- `@shared/*` → `src/shared/*`
+- `@utils/*` → `src/utils/*`
+
+Prefer these aliases over long relative imports when working across folders.
+
 ---
 
 ## 🗄️ Supabase Setup (Required)

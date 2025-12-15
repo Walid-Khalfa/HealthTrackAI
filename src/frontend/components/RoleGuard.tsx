@@ -1,7 +1,7 @@
 
 import React from 'react';
-import { useAuth } from '../context/AuthContext';
-import { AppRole } from '../types';
+import { AppRole } from '@shared/types';
+import { useAuth } from '@frontend/context/AuthContext';
 
 interface RoleGuardProps {
   allowedRoles: AppRole[];

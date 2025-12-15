@@ -1,7 +1,6 @@
-import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { supabase } from '../services/supabaseClient';
-import { getUserProfile } from '../services/supabaseClient';
-import { AppRole, UserProfile } from '../types';
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { getUserProfile, supabase } from '@backend/services/supabaseClient';
+import { AppRole, UserProfile } from '@shared/types';
 
 interface AuthContextType {
   role: AppRole;
