@@ -1,8 +1,7 @@
-
-import { useState, useEffect, useMemo } from 'react';
-import { HealthReport } from '../types';
-import { getHealthReports, getAllHealthReports } from '../services/supabaseClient';
-import { safeJsonParse, validateHealthReportList } from '../utils/security';
+import { useEffect, useMemo, useState } from 'react';
+import { HealthReport } from '@shared/types';
+import { getAllHealthReports, getHealthReports } from '@backend/services/supabaseClient';
+import { safeJsonParse, validateHealthReportList } from '@utils/security';
 
 export const useHealthData = (user: any, isAdmin: boolean, isAdminMode: boolean) => {
   const [reports, setReports] = useState<HealthReport[]>([]);
@@ -23,7 +22,7 @@ export const useHealthData = (user: any, isAdmin: boolean, isAdminMode: boolean)
 
       let data: HealthReport[] = [];
       if (isAdmin && isAdminMode) {
-        data = await getAllHealthReports();
+        data = await getAllHealthReports('admin');
       } else {
         data = await getHealthReports(user.id);
       }

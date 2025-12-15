@@ -1,6 +1,6 @@
 
 import { supabase } from './supabaseClient';
-import { AppRole } from '../types';
+import { AppRole } from '@shared/types';
 
 export const getCurrentUserRole = async (): Promise<AppRole> => {
   const { data: { session } } = await supabase.auth.getSession();

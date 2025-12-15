@@ -1,13 +1,13 @@
-import { useState, useEffect } from 'react';
-import { Message, MessageRole, Attachment, HealthReport, HealthRiskLevel } from '../shared/types';
-import { generateHealthAnalysis, classifyHealthRequest } from '../services/gemini';
-import { 
-  createPendingReport, 
-  uploadReportFiles, 
-  updateReportWithAIResult 
-} from '../services/supabaseClient';
-import { parseHealthReport } from '../shared/utils/reportParser';
-import { useAuth } from '../frontend/context/AuthContext';
+import { useState } from 'react';
+import { Attachment, HealthRiskLevel, Message, MessageRole } from '@shared/types';
+import { classifyHealthRequest, generateHealthAnalysis } from '@backend/services/gemini';
+import {
+  createPendingReport,
+  updateReportWithAIResult,
+  uploadReportFiles,
+} from '@backend/services/supabaseClient';
+import { parseHealthReport } from '@shared/utils/reportParser';
+import { useAuth } from '@frontend/context/AuthContext';
 
 export const useHealthAnalysisChat = () => {
   const { user } = useAuth();

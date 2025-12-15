@@ -1,7 +1,7 @@
 
 import { GoogleGenAI, GenerateContentResponse, Type } from "@google/genai";
-import { Attachment, AttachmentType, HealthRiskLevel } from "../../shared/types";
-import { MODEL_NAME, SYSTEM_INSTRUCTION } from "../../shared/constants";
+import { Attachment, AttachmentType, HealthRiskLevel } from "@shared/types";
+import { MODEL_NAME, SYSTEM_INSTRUCTION } from "@shared/constants";
 
 // Helper to safely access environment variables
 const getEnv = (key: string): string | undefined => {

@@ -1,10 +1,10 @@
-import { useState, useMemo } from 'react';
-import { HealthReport, HealthRiskLevel } from '../../shared/types';
-import { updateReportDetails, deleteHealthReport } from '../../backend/services/supabaseClient';
+import { type Dispatch, type SetStateAction, useState } from 'react';
+import { HealthReport, HealthRiskLevel } from '@shared/types';
+import { deleteHealthReport, updateReportDetails } from '@backend/services/supabaseClient';
 
 interface UseReportModalProps {
   isOfflineMode: boolean;
-  setReports: React.Dispatch<React.SetStateAction<HealthReport[]>>;
+  setReports: Dispatch<SetStateAction<HealthReport[]>>;
 }
 
 export const useReportModal = ({ isOfflineMode, setReports }: UseReportModalProps) => {

@@ -1,15 +1,10 @@
-import { useState, useEffect } from 'react';
-import { HealthReport, UserProfile } from '../../shared/types';
-import { getHealthReports, getAllHealthReports } from '../../backend/services/supabaseClient';
-import { useAuth } from '../context/AuthContext'; // Assuming useAuth is in ../context/AuthContext
-
-interface UseReportDataProps {
-  // Potentially accept filters or admin mode toggle if they affect the initial fetch
-  // For now, isAdminMode is managed inside the hook as it's directly tied to fetching all reports
-}
+import { useEffect, useState } from 'react';
+import { HealthReport } from '@shared/types';
+import { getAllHealthReports, getHealthReports } from '@backend/services/supabaseClient';
+import { useAuth } from '@frontend/context/AuthContext';
 
 export const useReportData = (isAdminMode: boolean) => {
-  const { user, profile, isAdmin } = useAuth();
+  const { user, role, isAdmin } = useAuth();
   const [reports, setReports] = useState<HealthReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [isOfflineMode, setIsOfflineMode] = useState(false);
@@ -33,7 +28,7 @@ export const useReportData = (isAdminMode: boolean) => {
 
       let data: HealthReport[] = [];
       if (isAdmin && isAdminMode) {
-        data = await getAllHealthReports(profile?.role || '');
+        data = await getAllHealthReports(role);
       } else {
         data = await getHealthReports(user.id);
       }

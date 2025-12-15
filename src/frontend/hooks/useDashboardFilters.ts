@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo } from 'react';
-import { HealthReport } from '../../shared/types';
+import { useEffect, useMemo, useState } from 'react';
+import { HealthReport } from '@shared/types';
 
 export const useDashboardFilters = (reports: HealthReport[], itemsPerPage: number) => {
   const [searchQuery, setSearchQuery] = useState('');

@@ -1,5 +1,5 @@
 
-import { logger } from '../services/logger';
+import { logger } from '@backend/services/logger';
 
 /**
  * SECURITY UTILITIES

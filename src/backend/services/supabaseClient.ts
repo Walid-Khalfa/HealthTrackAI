@@ -1,7 +1,7 @@
 
 
 import { createClient } from '@supabase/supabase-js';
-import { HealthReport, Attachment, AttachmentType, HealthRiskLevel, UserProfile } from '../../shared/types';
+import { Attachment, AttachmentType, HealthReport, HealthRiskLevel, UserProfile } from '@shared/types';
 
 // --- Supabase Initialization ---
 
@@ -257,7 +257,7 @@ export const getHealthReports = async (userId: string) => {
  * @param userRole - The role of the currently authenticated user.
  */
 export const getAllHealthReports = async (userRole: string) => {
-  if (userRole !== 'admin' && userRole !== 'service_role') { // Assuming 'admin' and 'service_role' are valid admin roles
+  if (userRole !== 'admin' && userRole !== 'super_admin' && userRole !== 'service_role') {
     console.warn('Unauthorized attempt to fetch all reports. User role:', userRole);
     return [];
   }
