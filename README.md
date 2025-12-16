@@ -108,6 +108,20 @@ This application is optimized for one-click setup in Google AI Studio.
     ```
     The application will be available at `http://localhost:5173` (or another port if 5173 is in use).
 
+### 🧪 Running tests (Vitest)
+
+Run the full test suite once:
+
+```bash
+npm run test
+```
+
+Run in watch mode while developing:
+
+```bash
+npm run test:watch
+```
+
 ### Module import aliases
 
 TypeScript and Vite are configured with `baseUrl: ./src` and the following path aliases:
